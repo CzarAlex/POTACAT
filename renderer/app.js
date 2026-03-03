@@ -7897,16 +7897,17 @@ async function showActivationMap(act) {
       .addTo(activationMap);
   }
 
-  // Contact markers — one per QSO, jittered to avoid stacking when
-  // multiple contacts resolve to the same cty.dat country-level position
+  // Contact markers — one per QSO, positioned via QRZ grid (precise)
+  // or cty.dat (country/call-area fallback), jittered to avoid stacking
   const bounds = [];
   if (parkLat != null && parkLon != null) bounds.push([parkLat, parkLon]);
   const usedPositions = []; // track placed positions for jitter
   for (let i = 0; i < act.contacts.length; i++) {
     const c = act.contacts[i];
-    const loc = locations[c.callsign];
+    // Prefer QRZ grid for precise positioning
+    const gridPos = c.grid ? gridToLatLonLocal(c.grid) : null;
+    const loc = gridPos || locations[c.callsign];
     if (!loc) continue;
-    // Jitter: offset markers that land on the same cty.dat position
     let cLat = loc.lat, cLon = loc.lon;
     const overlap = usedPositions.filter(p => Math.abs(p[0] - cLat) < 0.01 && Math.abs(p[1] - cLon) < 0.01).length;
     if (overlap > 0) {
@@ -7922,7 +7923,9 @@ async function showActivationMap(act) {
     const mm = (c.timeOn || '').substring(2, 4);
     const t = (hh && mm) ? `${hh}:${mm}` : '';
     const fMhz = c.freq ? parseFloat(c.freq).toFixed(3) : '';
-    const popupHtml = `<b>${c.callsign}</b>${c.name ? ' — ' + c.name : ''}<br>${t} UTC  ${fMhz} ${c.mode || ''}<br><span style="color:#aaa">${loc.name}</span>`;
+    const locName = loc.name || (locations[c.callsign] && locations[c.callsign].name) || '';
+    const gridLabel = c.grid ? ` (${c.grid})` : '';
+    const popupHtml = `<b>${c.callsign}</b>${c.name ? ' — ' + c.name : ''}<br>${t} UTC  ${fMhz} ${c.mode || ''}<br><span style="color:#aaa">${locName}${gridLabel}</span>`;
     const marker = L.circleMarker([cLat, cLon], {
       radius: 6, fillColor: '#4fc3f7', color: '#fff', weight: 1, fillOpacity: 0.85,
     }).bindPopup(popupHtml).addTo(activationMap);
@@ -8160,10 +8163,6 @@ async function activatorLogContact() {
     };
     activatorContacts.push(contact);
 
-    if (activatorContacts.length === 10) {
-      showCatCelebration('Meow! You hit 10 QSOs! \ud83c\udf89');
-    }
-
     // Push to activation map pop-out
     if (actmapPopoutOpen) {
       window.api.actmapPopoutContact({
@@ -8172,11 +8171,20 @@ async function activatorLogContact() {
       });
     }
 
-    // Fire-and-forget QRZ lookup for name
+    // Fire-and-forget QRZ lookup for name + grid
     window.api.qrzLookup(callsign).then(info => {
       if (info) {
         contact.name = qrzDisplayName(info);
+        if (info.grid) contact.grid = info.grid;
         renderActivatorLog();
+        // Update pop-out map with precise grid location
+        if (actmapPopoutOpen && info.grid) {
+          window.api.actmapPopoutContact({
+            parkRefs: activatorParkRefs.map(p => p.ref),
+            contact,
+            update: true, // signal this is a location update, not a new contact
+          });
+        }
       }
     }).catch(() => {});
   }

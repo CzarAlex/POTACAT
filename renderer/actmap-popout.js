@@ -60,6 +60,27 @@ function drawArc(map, lat1, lon1, lat2, lon2) {
   return layers;
 }
 
+function gridToLatLon(grid) {
+  if (!grid || grid.length < 4) return null;
+  const g = grid.toUpperCase();
+  const lonField = g.charCodeAt(0) - 65;
+  const latField = g.charCodeAt(1) - 65;
+  const lonSquare = parseInt(g[2], 10);
+  const latSquare = parseInt(g[3], 10);
+  let lon = lonField * 20 + lonSquare * 2 - 180;
+  let lat = latField * 10 + latSquare * 1 - 90;
+  if (grid.length >= 6) {
+    const lonSub = g.charCodeAt(4) - 65;
+    const latSub = g.charCodeAt(5) - 65;
+    lon += lonSub * (2 / 24) + (1 / 24);
+    lat += latSub * (1 / 24) + (1 / 48);
+  } else {
+    lon += 1;
+    lat += 0.5;
+  }
+  return { lat, lon };
+}
+
 // --- State ---
 
 let map = null;
@@ -125,7 +146,7 @@ function addContactMarker(callsign, lat, lon, timeUtc, freqDisplay, mode, name) 
   if (parkLat != null && parkLon != null) {
     arcs = drawArc(map, parkLat, parkLon, cLat, cLon);
   }
-  contactMarkers.push({ marker, arcs });
+  contactMarkers.push({ callsign, marker, arcs });
 }
 
 // --- Update Counter ---
@@ -181,7 +202,9 @@ async function handleActivationData(data) {
   if (pLat != null && pLon != null) bounds.push([pLat, pLon]);
 
   for (const c of contacts) {
-    const loc = locations[c.callsign];
+    // Prefer QRZ grid (precise) over cty.dat (country/call-area level)
+    const gridPos = c.grid ? gridToLatLon(c.grid) : null;
+    const loc = gridPos || locations[c.callsign];
     if (!loc) continue;
     addContactMarker(c.callsign, loc.lat, loc.lon, c.timeUtc, c.freqDisplay, c.mode, c.name);
     bounds.push([loc.lat, loc.lon]);
@@ -199,6 +222,24 @@ async function handleActivationData(data) {
 async function handleContactAdded(data) {
   const contact = data.contact;
   if (!contact) return;
+
+  // If this is a location update (QRZ grid arrived after initial add),
+  // replace the existing marker with a precisely positioned one
+  if (data.update) {
+    const idx = contactMarkers.findIndex(m => m.callsign === contact.callsign);
+    if (idx >= 0 && contact.grid) {
+      const pos = gridToLatLon(contact.grid);
+      if (pos) {
+        const old = contactMarkers[idx];
+        if (old.marker) map.removeLayer(old.marker);
+        if (old.arcs) old.arcs.forEach(a => map.removeLayer(a));
+        contactMarkers.splice(idx, 1);
+        addContactMarker(contact.callsign, pos.lat, pos.lon, contact.timeUtc, contact.freqDisplay, contact.mode, contact.name);
+      }
+    }
+    return;
+  }
+
   contactCount++;
   updateCounter();
 
@@ -208,12 +249,14 @@ async function handleContactAdded(data) {
     parkMarker.setPopupContent(`<b>${ref}</b><br>${contactCount} contact${contactCount !== 1 ? 's' : ''}`);
   }
 
-  // Resolve location for single callsign
-  let loc = null;
-  try {
-    const locs = await window.api.resolveCallsignLocations([contact.callsign]);
-    loc = locs[contact.callsign];
-  } catch {}
+  // Prefer QRZ grid (precise) over cty.dat (country/call-area level)
+  let loc = contact.grid ? gridToLatLon(contact.grid) : null;
+  if (!loc) {
+    try {
+      const locs = await window.api.resolveCallsignLocations([contact.callsign]);
+      loc = locs[contact.callsign];
+    } catch {}
+  }
 
   if (!loc) return;
   addContactMarker(contact.callsign, loc.lat, loc.lon, contact.timeUtc, contact.freqDisplay, contact.mode, contact.name);
