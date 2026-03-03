@@ -2868,6 +2868,33 @@ document.addEventListener('keydown', (e) => {
     if (scanning) { stopScan(); } else { startScan(); }
     return;
   }
+  // Arrow Up/Down — navigate spots in table view
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.target.matches('input, select, textarea') && showTable && !scanning) {
+    e.preventDefault();
+    const filtered = sortSpots(getFiltered());
+    if (filtered.length === 0) return;
+    // Find current index
+    let idx = -1;
+    if (lastTunedSpot) {
+      idx = filtered.findIndex(s => s.callsign === lastTunedSpot.callsign && s.frequency === lastTunedSpot.frequency);
+    }
+    // Move
+    if (e.key === 'ArrowDown') {
+      idx = idx < filtered.length - 1 ? idx + 1 : 0;
+    } else {
+      idx = idx > 0 ? idx - 1 : filtered.length - 1;
+    }
+    const spot = filtered[idx];
+    lastTunedSpot = spot;
+    prefillDxCommand(spot);
+    window.api.tune(spot.frequency, spot.mode, spot.bearing);
+    if (spot.lat != null && spot.lon != null) showTuneArc(spot.lat, spot.lon, spot.frequency, spot.source);
+    render();
+    // Scroll the tuned row into view
+    const onFreqRow = tbody.querySelector('.on-freq');
+    if (onFreqRow) onFreqRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    return;
+  }
   // S — Toggle split mode
   if (e.key === 's' && !e.target.matches('input, select, textarea')) {
     e.preventDefault();

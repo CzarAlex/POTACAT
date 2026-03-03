@@ -387,13 +387,18 @@ POTACAT bundles **Hamlib 4.6.5** (rigctld) — no separate installation needed. 
 
 POTACAT spawns a `rigctld` process, connects via TCP, and translates commands to your radio's native protocol.
 
-### rigctld Network
+### rigctld Network (flrig, grig, etc.)
 
-**Best for:** Connecting to an existing rigctld instance running on another machine or managed by other software.
+**Best for:** Radios controlled by flrig, grig, or any software that exposes a rigctld-compatible TCP server — especially on Linux (Raspberry Pi, etc.).
+
+If you already use **flrig** to control your radio, you don't need POTACAT's bundled Hamlib at all. flrig includes a built-in rigctld emulation server that POTACAT can connect to directly.
 
 1. Add a new rig → select **rigctld Network**
-2. Enter the host and port (default `localhost:4532`)
-3. Save
+2. Set the host (`127.0.0.1` if on the same machine, or the remote IP)
+3. Set the port to `4532` (flrig's default rigctld port)
+4. Save
+
+In flrig, make sure the rigctld server is enabled: **Config → Setup → Server**.
 
 ### My Rigs
 
@@ -426,8 +431,9 @@ Win4Yaesu caches radio state, so POTACAT's polling doesn't add load on the radio
 | Kenwood TS-480/590/2000 | Serial CAT (Kenwood) | 9600 | No | Also works with Hamlib |
 | Elecraft KX2/KX3/K3 | Serial CAT (Kenwood) | 38400 | No | |
 | Elecraft K4 | IP Radio (TCP CAT) | — | — | Ethernet TCP CAT |
+| Xiegu X6100 | rigctld Network (flrig) | — | — | CI-V via flrig; tested on Raspberry Pi 5 |
 
-If your rig isn't listed, try **Serial CAT (Kenwood)** first — many radios support FA/MD commands — then fall back to **Hamlib**.
+If your rig isn't listed, try **Serial CAT (Kenwood)** first — many radios support FA/MD commands — then fall back to **Hamlib** or **rigctld Network** (if you use flrig).
 
 ### SmartSDR Panadapter Spots
 
