@@ -2552,12 +2552,12 @@ const SOURCE_STROKES_CB = {
 const RBN_BAND_COLORS_NORMAL = {
   '160m': '#ff4444', '80m': '#ff8c00', '60m': '#ffd700', '40m': '#4ecca3',
   '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
-  '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0',
+  '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '2m': '#88ff88', '70cm': '#ffaa44',
 };
 const RBN_BAND_COLORS_CB = {
   '160m': '#ffa726', '80m': '#ffca28', '60m': '#fff176', '40m': '#4fc3f7',
   '30m': '#00cccc', '20m': '#4488ff', '17m': '#8844ff', '15m': '#cc44ff',
-  '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0',
+  '12m': '#ff44cc', '10m': '#ff4488', '6m': '#e0e0e0', '2m': '#88ff88', '70cm': '#ffaa44',
 };
 
 let SOURCE_COLORS_ACTIVE = { ...SOURCE_COLORS_NORMAL };
@@ -2685,6 +2685,20 @@ function greatCircleArc(lat1, lon1, lat2, lon2, numPoints) {
     ]);
   }
   return points;
+}
+
+// Pick the copy of lon (lon, lon-360, lon+360) closest to refLon
+// Used to keep activation map bounds tight across the antimeridian
+function wrapLon(refLon, lon) {
+  let best = lon, bestDist = Math.abs(lon - refLon);
+  for (const offset of [-360, 360]) {
+    const wrapped = lon + offset;
+    if (Math.abs(wrapped - refLon) < bestDist) {
+      best = wrapped;
+      bestDist = Math.abs(wrapped - refLon);
+    }
+  }
+  return best;
 }
 
 // Default center: FN20jb (eastern PA) ≈ 40.35°N, 75.58°W
@@ -2922,6 +2936,7 @@ const PRIVILEGE_RANGES = {
     [14000, 14150, 'cw_digi'], [14150, 14350, 'phone'], [18068, 18168, 'all'],
     [21000, 21200, 'cw_digi'], [21200, 21450, 'phone'], [24890, 24990, 'all'],
     [28000, 28300, 'cw_digi'], [28300, 29700, 'phone'], [50000, 54000, 'all'],
+    [144000, 148000, 'all'], [420000, 450000, 'all'],
   ],
   us_advanced: [
     [1800, 2000, 'all'], [3525, 3600, 'cw_digi'], [3700, 4000, 'phone'],
@@ -2929,6 +2944,7 @@ const PRIVILEGE_RANGES = {
     [14025, 14150, 'cw_digi'], [14175, 14350, 'phone'], [18068, 18168, 'all'],
     [21025, 21200, 'cw_digi'], [21225, 21450, 'phone'], [24890, 24990, 'all'],
     [28000, 28300, 'cw_digi'], [28300, 29700, 'phone'], [50000, 54000, 'all'],
+    [144000, 148000, 'all'], [420000, 450000, 'all'],
   ],
   us_general: [
     [1800, 2000, 'all'], [3525, 3600, 'cw_digi'], [3800, 4000, 'phone'],
@@ -2936,19 +2952,21 @@ const PRIVILEGE_RANGES = {
     [14025, 14150, 'cw_digi'], [14225, 14350, 'phone'], [18068, 18168, 'all'],
     [21025, 21200, 'cw_digi'], [21275, 21450, 'phone'], [24890, 24990, 'all'],
     [28000, 28300, 'cw_digi'], [28300, 29700, 'phone'], [50000, 54000, 'all'],
+    [144000, 148000, 'all'], [420000, 450000, 'all'],
   ],
   us_technician: [
     [3525, 3600, 'cw_digi'], [7025, 7125, 'cw_digi'], [21025, 21200, 'cw_digi'],
     [28000, 28300, 'cw_digi'], [28300, 28500, 'phone'], [50000, 54000, 'all'],
+    [144000, 148000, 'all'], [420000, 450000, 'all'],
   ],
   ca_basic: [
-    [50000, 54000, 'all'],
+    [50000, 54000, 'all'], [144000, 148000, 'all'], [420000, 450000, 'all'],
   ],
   ca_honours: [
     [1800, 2000, 'all'], [3500, 4000, 'all'], [7000, 7300, 'all'],
     [10100, 10150, 'all'], [14000, 14350, 'all'], [18068, 18168, 'all'],
     [21000, 21450, 'all'], [24890, 24990, 'all'], [28000, 29700, 'all'],
-    [50000, 54000, 'all'],
+    [50000, 54000, 'all'], [144000, 148000, 'all'], [420000, 450000, 'all'],
   ],
 };
 
@@ -4010,7 +4028,7 @@ splitSplitterEl.addEventListener('mousedown', (e) => {
 });
 
 // --- DXCC Matrix Rendering ---
-const DXCC_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
+const DXCC_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '70cm'];
 
 function isEntityConfirmedOnBand(ent, band, modeFilter) {
   const modes = ent.confirmed[band];
@@ -4435,7 +4453,8 @@ const BAND_RANGES = [
   [1800, 2000, '160m'], [3500, 4000, '80m'], [5330, 5410, '60m'],
   [7000, 7300, '40m'], [10100, 10150, '30m'], [14000, 14350, '20m'],
   [18068, 18168, '17m'], [21000, 21450, '15m'], [24890, 24990, '12m'],
-  [28000, 29700, '10m'], [50000, 54000, '6m'],
+  [28000, 29700, '10m'], [50000, 54000, '6m'], [144000, 148000, '2m'],
+  [420000, 450000, '70cm'],
 ];
 
 function freqKhzToBand(khz) {
@@ -6597,7 +6616,7 @@ window.api.onSolarData(({ sfi, kIndex, aIndex }) => {
 });
 
 // --- Band Activity Heatmap ---
-const HEATMAP_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
+const HEATMAP_BANDS = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '70cm'];
 const HEATMAP_CONTINENTS = ['EU', 'NA', 'SA', 'AS', 'AF', 'OC'];
 
 function updateBandActivityVisibility() {
@@ -6829,7 +6848,7 @@ function renderRbnMarkers() {
 
 function renderRbnLegend(activeBands) {
   rbnLegendEl.innerHTML = '';
-  const sortedBands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m'];
+  const sortedBands = ['160m', '80m', '60m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m', '2m', '70cm'];
   for (const band of sortedBands) {
     if (!activeBands.has(band)) continue;
     const item = document.createElement('span');
@@ -8684,6 +8703,7 @@ async function showActivationMap(act) {
   // Contact markers — one per QSO, positioned via QRZ grid (precise)
   // or cty.dat (country/call-area fallback), jittered to avoid stacking
   const bounds = [];
+  const refLon = parkLon ?? -98.5; // reference for antimeridian wrapping
   if (parkLat != null && parkLon != null) bounds.push([parkLat, parkLon]);
   const usedPositions = []; // track placed positions for jitter
   for (let i = 0; i < act.contacts.length; i++) {
@@ -8692,7 +8712,7 @@ async function showActivationMap(act) {
     const gridPos = c.grid ? gridToLatLonLocal(c.grid) : null;
     const loc = gridPos || locations[c.callsign];
     if (!loc) continue;
-    let cLat = loc.lat, cLon = loc.lon;
+    let cLat = loc.lat, cLon = wrapLon(refLon, loc.lon);
     const overlap = usedPositions.filter(p => Math.abs(p[0] - cLat) < 0.01 && Math.abs(p[1] - cLon) < 0.01).length;
     if (overlap > 0) {
       // Spread in a small circle around the base point using golden angle
@@ -9184,6 +9204,7 @@ async function renderShareImage(pastAct) {
   };
 
   const bounds = [];
+  const shareRefLon = parkLon ?? -98.5;
   if (parkLat != null) bounds.push([parkLat, parkLon]);
   const usedPositions = [];
   let furthestCall = null, furthestDist = 0;
@@ -9192,7 +9213,7 @@ async function renderShareImage(pastAct) {
     const gridPos = c.grid ? gridToLatLonLocal(c.grid) : null;
     const loc = gridPos || locations[c.callsign];
     if (!loc) continue;
-    let cLat = loc.lat, cLon = loc.lon;
+    let cLat = loc.lat, cLon = wrapLon(shareRefLon, loc.lon);
 
     // Track furthest QSO from park
     if (parkLat != null) {
@@ -9532,6 +9553,7 @@ function freqToBandActivator(khz) {
   if (khz >= 28000 && khz <= 29700) return '10m';
   if (khz >= 50000 && khz <= 54000) return '6m';
   if (khz >= 144000 && khz <= 148000) return '2m';
+  if (khz >= 420000 && khz <= 450000) return '70cm';
   return '';
 }
 

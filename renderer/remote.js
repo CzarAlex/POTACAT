@@ -74,6 +74,7 @@
   let spotMap = null;
   let spotMapLayer = null;
   let spotTuneArcLayer = null;
+  let spotMapHasFit = false;
   let currentFreqKhz = 0;
   let currentMode = '';
   let tunedFreqKhz = '';
@@ -275,14 +276,27 @@
   const soMaxageVal = document.getElementById('so-maxage-val');
   const soDistMi = document.getElementById('so-dist-mi');
   const soDistKm = document.getElementById('so-dist-km');
-  const soXitDn = document.getElementById('so-xit-dn');
-  const soXitUp = document.getElementById('so-xit-up');
-  const soXitVal = document.getElementById('so-xit-val');
-
+  const soThemeDark = document.getElementById('so-theme-dark');
+  const soThemeLight = document.getElementById('so-theme-light');
   // Settings state from desktop
   let maxAgeMin = 5;
   let distUnit = 'mi';
-  let cwXit = 0;
+
+  // --- Theme ---
+  function applyTheme(light) {
+    document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+    soThemeDark.classList.toggle('active', !light);
+    soThemeLight.classList.toggle('active', light);
+    // Update mobile browser chrome color
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', light ? '#e8eaed' : '#0f3460');
+    localStorage.setItem('echocat-theme', light ? 'light' : 'dark');
+  }
+  // Apply saved theme on load
+  applyTheme(localStorage.getItem('echocat-theme') === 'light');
+
+  soThemeDark.addEventListener('click', () => applyTheme(false));
+  soThemeLight.addEventListener('click', () => applyTheme(true));
 
   // --- Connect ---
   connectBtn.addEventListener('click', () => {
@@ -360,12 +374,10 @@
           refreshRateBtn.textContent = refreshInterval + 's';
           maxAgeMin = msg.settings.maxAgeMin != null ? msg.settings.maxAgeMin : 5;
           distUnit = msg.settings.distUnit || 'mi';
-          cwXit = msg.settings.cwXit || 0;
           // Sync overlay values
           soDwellVal.textContent = scanDwell + 's';
           soRefreshVal.textContent = refreshInterval + 's';
           soMaxageVal.textContent = maxAgeMin + 'm';
-          soXitVal.textContent = cwXit + ' Hz';
           soDistMi.classList.toggle('active', distUnit === 'mi');
           soDistKm.classList.toggle('active', distUnit === 'km');
         }
@@ -748,8 +760,6 @@
     if (!spotMap) return;
     if (spotMapLayer) spotMapLayer.clearLayers();
     else spotMapLayer = L.layerGroup().addTo(spotMap);
-    // Clear tune arc on re-render
-    if (spotTuneArcLayer) { spotMap.removeLayer(spotTuneArcLayer); spotTuneArcLayer = null; }
 
     const filtered = getFilteredSpots();
     const bounds = [];
@@ -783,8 +793,12 @@
       bounds.push([s.lat, s.lon]);
     });
 
-    if (bounds.length > 1) spotMap.fitBounds(bounds, { padding: [30, 30] });
-    else if (bounds.length === 1) spotMap.setView(bounds[0], 5);
+    // Only auto-zoom on first render; subsequent updates preserve user's pan/zoom
+    if (!spotMapHasFit) {
+      if (bounds.length > 1) spotMap.fitBounds(bounds, { padding: [30, 30] });
+      else if (bounds.length === 1) spotMap.setView(bounds[0], 5);
+      spotMapHasFit = true;
+    }
   }
 
   function parseSpotTime(t) {
@@ -1100,22 +1114,6 @@
     soDistMi.classList.remove('active');
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'set-dist-unit', value: 'km' }));
-    }
-  });
-
-  // CW XIT stepper (±10 Hz per step)
-  soXitDn.addEventListener('click', () => {
-    cwXit = Math.max(-999, cwXit - 10);
-    soXitVal.textContent = cwXit + ' Hz';
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'set-cw-xit', value: cwXit }));
-    }
-  });
-  soXitUp.addEventListener('click', () => {
-    cwXit = Math.min(999, cwXit + 10);
-    soXitVal.textContent = cwXit + ' Hz';
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'set-cw-xit', value: cwXit }));
     }
   });
 
@@ -1860,10 +1858,16 @@
       filterBar.classList.remove('hidden');
       sortBar.classList.remove('hidden');
       if (!spotMap) {
-        spotMap = L.map('spot-map', { zoomControl: true }).setView([39.8, -98.5], 4);
+        spotMap = L.map('spot-map', {
+          zoomControl: true,
+          maxBounds: [[-85, -300], [85, 300]],
+          maxBoundsViscosity: 1.0,
+          minZoom: 2
+        }).setView([39.8, -98.5], 4);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '&copy; OSM',
-          className: 'dark-tiles'
+          className: 'dark-tiles',
+          noWrap: true
         }).addTo(spotMap);
       }
       setTimeout(() => spotMap.invalidateSize(), 100);
@@ -2446,6 +2450,19 @@
     return pts;
   }
 
+  function wrapLon(refLon, lon) {
+    var best = lon, bestDist = Math.abs(lon - refLon);
+    for (var oi = 0; oi < 2; oi++) {
+      var offset = oi === 0 ? -360 : 360;
+      var wrapped = lon + offset;
+      if (Math.abs(wrapped - refLon) < bestDist) {
+        best = wrapped;
+        bestDist = Math.abs(wrapped - refLon);
+      }
+    }
+    return best;
+  }
+
   function showActivationMap(data) {
     actMapOverlay.classList.remove('hidden');
     actMapTitle.textContent = data.parkRef || '';
@@ -2465,6 +2482,7 @@
     }).addTo(actMap);
 
     var bounds = [];
+    var amRefLon = (data.park && data.park.lon != null) ? data.park.lon : -98.5;
 
     // Park marker (green circle)
     if (data.park && data.park.lat != null) {
@@ -2479,7 +2497,8 @@
     for (var i = 0; i < resolved.length; i++) {
       var c = resolved[i];
       if (c.lat == null) continue;
-      var ll = [c.lat, c.lon];
+      var cLon = wrapLon(amRefLon, c.lon);
+      var ll = [c.lat, cLon];
       L.circleMarker(ll, { radius: 6, color: '#4fc3f7', fillColor: '#4fc3f7', fillOpacity: 0.7, weight: 1 })
         .bindPopup('<b>' + esc(c.callsign) + '</b><br>' + esc(c.entityName || '') + '<br>' + (c.freq || '') + ' ' + (c.mode || ''))
         .addTo(actMap);

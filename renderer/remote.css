@@ -342,6 +342,13 @@ html, body {
 #settings-overlay.disabled .so-step-btn,
 #settings-overlay.disabled .so-slider { opacity: 0.3; pointer-events: none; }
 
+.so-footer { text-align: center; margin-top: 24px; padding: 16px 0 8px; border-top: 1px solid #333; }
+.so-footer-by { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.so-footer-links { display: flex; justify-content: center; gap: 8px; font-size: 12px; }
+.so-footer-links a { color: #4fc3f7; text-decoration: none; }
+.so-footer-links a:active { text-decoration: underline; }
+.so-footer-dot { color: #555; }
+
 .rc-btn {
   min-width: 36px;
   height: 32px;
@@ -1692,3 +1699,149 @@ html, body {
   color: var(--text-dim);
   font-size: 14px;
 }
+
+/* ========== LIGHT MODE ========== */
+[data-theme="light"] {
+  --bg: #f0f2f5;
+  --bg-card: #ffffff;
+  --bg-header: #e8eaed;
+  --accent: #d32f2f;
+  --text: #1a1a2e;
+  --text-dim: #6a6a80;
+}
+
+/* Token input */
+[data-theme="light"] #token-input { border-color: #ccc; }
+
+/* Mode picker */
+[data-theme="light"] #mode-picker { border-color: #ccc; box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
+[data-theme="light"] .mp-btn { border-color: #ccc; }
+[data-theme="light"] .mp-btn.active { background: rgba(78, 204, 163, 0.1); }
+
+/* Status bar borders */
+[data-theme="light"] #status-bar { border-bottom-color: #ddd; }
+[data-theme="light"] #mode-badge { background: #ddd; }
+[data-theme="light"] #mode-badge.tappable { border-color: #bbb; }
+
+/* Freq edit */
+[data-theme="light"] #freq-input { border-color: var(--accent); }
+
+/* Settings overlay */
+[data-theme="light"] .so-header { border-bottom-color: #ddd; }
+[data-theme="light"] .so-section-label { border-bottom-color: #ddd; }
+[data-theme="light"] .so-row { border-bottom-color: #f0f2f5; }
+[data-theme="light"] .so-select { border-color: #ccc; }
+[data-theme="light"] .so-step-btn { border-color: #ccc; }
+[data-theme="light"] .so-step-btn:active { background: var(--bg-header); border-color: var(--pota); color: var(--pota); }
+[data-theme="light"] .so-step-val { border-color: #ccc; }
+[data-theme="light"] .so-footer { border-top-color: #ddd; }
+[data-theme="light"] .so-footer-dot { color: #bbb; }
+[data-theme="light"] .rc-btn { border-color: #ccc; }
+[data-theme="light"] .rc-btn:active { border-color: var(--pota); }
+[data-theme="light"] .rc-toggle.active { background: rgba(78, 204, 163, 0.1); }
+[data-theme="light"] .rc-vfo.active { background: rgba(78, 204, 163, 0.1); }
+
+/* PTT / buttons */
+[data-theme="light"] .ptt-button { border-color: #ccc; }
+[data-theme="light"] .estop-button { background: #ddd; border-color: #bbb; }
+[data-theme="light"] .audio-button { background: #ddd; border-color: #bbb; }
+[data-theme="light"] .speaker-button { background: #ddd; border-color: #bbb; }
+
+/* Source / filter chips */
+[data-theme="light"] .source-chip { border-color: #ccc; }
+[data-theme="light"] .filter-chip { border-color: #ccc; }
+
+/* Sort bar */
+[data-theme="light"] .sort-select { border-color: #ccc; }
+
+/* Spot cards */
+[data-theme="light"] .spot-card { border-left-color: #bbb; }
+[data-theme="light"] .spot-card:active { background: #e0e4ea; }
+[data-theme="light"] .spot-card.tuned { background: rgba(79, 195, 247, 0.08); }
+[data-theme="light"] .spot-call { color: #1a1a2e; }
+[data-theme="light"] .spot-mode { background: #e0e0e0; }
+[data-theme="light"] .spot-log-btn { border-color: #bbb; }
+[data-theme="light"] .spot-log-btn:active { background: var(--bg-header); border-color: var(--pota); color: var(--pota); }
+
+/* Scan bar */
+[data-theme="light"] .scan-button { border-color: #ccc; }
+[data-theme="light"] .refresh-chip { border-color: #ccc; }
+
+/* Tab bar */
+[data-theme="light"] #tab-bar { border-bottom-color: #ddd; }
+[data-theme="light"] #tab-bar .tab.active { color: #1a1a2e; }
+
+/* Bottom bar */
+[data-theme="light"] #bottom-bar { border-top-color: #ddd; }
+
+/* Log sheet */
+[data-theme="light"] .log-sheet-handle { background: #bbb; }
+[data-theme="light"] .log-field input,
+[data-theme="light"] .log-field select { border-color: #ccc; }
+[data-theme="light"] .log-btn-cancel { background: #ddd; color: #6a6a80; }
+[data-theme="light"] .log-toast { border-color: #ccc; }
+
+/* Activation banner */
+[data-theme="light"] #activation-banner { border-bottom-color: #ddd; }
+
+/* Setup screen */
+[data-theme="light"] .setup-type-btn { border-color: #ccc; }
+[data-theme="light"] #setup-ref-input { border-color: #ccc; color: #1a1a2e; }
+[data-theme="light"] .setup-dropdown { border-color: #bbb; }
+[data-theme="light"] .setup-dropdown-item { border-bottom-color: #eee; }
+[data-theme="light"] .setup-dropdown-item:active { background: #e8eaed; }
+
+/* Quick-log form */
+[data-theme="light"] #ql-call { border-color: #ccc; color: #1a1a2e; }
+[data-theme="light"] .ql-freq { border-color: #ccc; }
+[data-theme="light"] .ql-mode { border-color: #ccc; }
+[data-theme="light"] .ql-rst { border-color: #ccc; }
+[data-theme="light"] .ql-notes { border-color: #ccc; }
+
+/* Contact list */
+[data-theme="light"] .contact-call { color: #1a1a2e; }
+[data-theme="light"] .contact-mode { background: #e0e0e0; }
+
+/* Log footer */
+[data-theme="light"] #log-footer { border-top-color: #ddd; }
+[data-theme="light"] .export-adif-btn { border-color: #bbb; }
+[data-theme="light"] .export-adif-btn:active { background: var(--bg-header); border-color: var(--pota); }
+
+/* Past activations */
+[data-theme="light"] .pa-count { background: #e0e0e0; }
+[data-theme="light"] .pa-contact-row { border-bottom-color: #eee; }
+[data-theme="light"] .pa-call { color: #1a1a2e; }
+[data-theme="light"] .pa-mode { background: #e0e0e0; }
+[data-theme="light"] .pa-map-btn { border-color: var(--pota); }
+[data-theme="light"] .pa-export-btn { border-color: #bbb; }
+
+/* Activation map overlay */
+[data-theme="light"] .act-map-bar { border-bottom-color: #ddd; }
+
+/* Map tiles — remove dark filter */
+[data-theme="light"] .dark-tiles { filter: none; }
+
+/* Leaflet popups */
+[data-theme="light"] .leaflet-popup-content-wrapper { background: #fff; color: #1a1a2e; }
+[data-theme="light"] .leaflet-popup-tip { background: #fff; }
+
+/* Log type chips */
+[data-theme="light"] .log-type-chip { border-color: #ccc; }
+[data-theme="light"] .lt-type-chip { border-color: #ccc; }
+[data-theme="light"] .log-addl-input,
+[data-theme="light"] #log-respot-comment { border-color: #ccc; }
+[data-theme="light"] .log-addl-add-btn { border-color: #ccc; }
+
+/* Logbook view */
+[data-theme="light"] #lb-search { border-color: #ccc; }
+[data-theme="light"] .lb-call { color: #1a1a2e; }
+[data-theme="light"] .lb-mode { background: #e0e0e0; }
+[data-theme="light"] .lb-detail .log-field input,
+[data-theme="light"] .lb-detail .log-field select { border-color: #ccc; }
+[data-theme="light"] .lb-delete-btn { border-color: var(--accent); }
+
+/* Reconnecting overlay */
+[data-theme="light"] #reconnecting { background: rgba(255,255,255,0.7); }
+
+/* Welcome overlay */
+[data-theme="light"] #welcome-overlay { background: rgba(255,255,255,0.6); }

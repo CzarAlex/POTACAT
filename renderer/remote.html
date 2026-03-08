@@ -10,6 +10,7 @@
   <title>ECHOCAT</title>
   <!-- leaflet-css -->
   <link rel="stylesheet" href="remote.css">
+  <script>if(localStorage.getItem('echocat-theme')==='light'){document.documentElement.setAttribute('data-theme','light');document.querySelector('meta[name="theme-color"]').content='#e8eaed'}</script>
 </head>
 <body>
 
@@ -150,11 +151,19 @@
           </div>
         </div>
         <div class="so-row">
-          <label class="so-label">CW XIT</label>
-          <div class="so-stepper">
-            <button type="button" class="so-step-btn" id="so-xit-dn">&minus;</button>
-            <span id="so-xit-val" class="so-step-val">0 Hz</span>
-            <button type="button" class="so-step-btn" id="so-xit-up">+</button>
+          <label class="so-label">Theme</label>
+          <div class="so-controls">
+            <button type="button" class="rc-btn rc-toggle active" id="so-theme-dark">Dark</button>
+            <button type="button" class="rc-btn rc-toggle" id="so-theme-light">Light</button>
+          </div>
+        </div>
+
+        <div class="so-footer">
+          <div class="so-footer-by">Casey Stanton, K3SBP</div>
+          <div class="so-footer-links">
+            <a href="https://discord.gg/JjdKSshej" target="_blank" rel="noopener">Discord</a>
+            <span class="so-footer-dot">&middot;</span>
+            <a href="https://buymeacoffee.com/potacat" target="_blank" rel="noopener">Buy Me a Coffee</a>
           </div>
         </div>
       </div>
@@ -209,6 +218,8 @@
         <button class="filter-chip" data-band="12m">12</button>
         <button class="filter-chip" data-band="10m">10</button>
         <button class="filter-chip" data-band="6m">6</button>
+        <button class="filter-chip" data-band="2m">2</button>
+        <button class="filter-chip" data-band="70cm">70cm</button>
       </div>
       <button id="new-only-chip" class="filter-chip new-chip hidden" data-band="">NEW</button>
       <button id="hide-worked-chip" class="filter-chip worked-chip hidden">Hide &#x2713;</button>
