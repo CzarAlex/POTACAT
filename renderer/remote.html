@@ -50,42 +50,113 @@
       </div>
     </div>
 
-    <!-- Rig controls strip (collapsible) -->
-    <div id="rig-controls" class="hidden">
-      <div id="rc-rig" class="rc-group hidden">
-        <select id="rig-select" class="rc-rig-select"></select>
+    <!-- Mode picker popup -->
+    <div id="mode-picker" class="hidden">
+      <button class="mp-btn" data-mode="USB">USB</button>
+      <button class="mp-btn" data-mode="LSB">LSB</button>
+      <button class="mp-btn" data-mode="CW">CW</button>
+      <button class="mp-btn" data-mode="FT8">FT8</button>
+      <button class="mp-btn" data-mode="FT4">FT4</button>
+      <button class="mp-btn" data-mode="FM">FM</button>
+      <button class="mp-btn" data-mode="AM">AM</button>
+      <button class="mp-btn" data-mode="RTTY">RTTY</button>
+    </div>
+
+    <!-- Settings overlay (replaces inline rig controls strip) -->
+    <div id="settings-overlay" class="hidden">
+      <div class="so-header">
+        <span class="so-title">Settings</span>
+        <button type="button" id="so-close" class="so-close">&times;</button>
       </div>
-      <div class="rc-sep" id="rc-rig-sep"></div>
-      <div id="rc-filter" class="rc-group">
-        <button type="button" class="rc-btn" id="rc-bw-dn" title="Narrower">&#x25C0;</button>
-        <span id="rc-bw-label" class="rc-bw-label">--</span>
-        <button type="button" class="rc-btn" id="rc-bw-up" title="Wider">&#x25B6;</button>
-      </div>
-      <div class="rc-sep"></div>
-      <div id="rc-nb" class="rc-group">
-        <button type="button" class="rc-btn rc-toggle" id="rc-nb-btn">NB</button>
-      </div>
-      <div class="rc-sep" id="rc-atu-sep"></div>
-      <div id="rc-atu" class="rc-group hidden">
-        <button type="button" class="rc-btn rc-toggle" id="rc-atu-btn">ATU</button>
-      </div>
-      <div class="rc-sep" id="rc-rfgain-sep"></div>
-      <div id="rc-rfgain" class="rc-group rc-slider-group hidden">
-        <label class="rc-slider-label">RF</label>
-        <input type="range" id="rc-rfgain-slider" class="rc-slider" min="0" max="100" value="50">
-        <span id="rc-rfgain-val" class="rc-slider-val">50</span>
-      </div>
-      <div class="rc-sep" id="rc-txpower-sep"></div>
-      <div id="rc-txpower" class="rc-group rc-slider-group hidden">
-        <label class="rc-slider-label">PWR</label>
-        <input type="range" id="rc-txpower-slider" class="rc-slider" min="0" max="100" value="100">
-        <span id="rc-txpower-val" class="rc-slider-val">100</span>
-      </div>
-      <div class="rc-sep"></div>
-      <div id="rc-vfo" class="rc-group">
-        <button type="button" class="rc-btn rc-vfo" id="rc-vfo-a">A</button>
-        <button type="button" class="rc-btn rc-vfo" id="rc-vfo-b">B</button>
-        <button type="button" class="rc-btn" id="rc-vfo-swap" title="Swap VFO">A&#x21C4;B</button>
+      <div class="so-body">
+
+        <!-- Rig selector -->
+        <div id="so-rig-row" class="so-row hidden">
+          <label class="so-label">Rig</label>
+          <select id="rig-select" class="so-select"></select>
+        </div>
+
+        <!-- Radio controls section -->
+        <div class="so-section-label">Radio</div>
+        <div id="so-filter-row" class="so-row">
+          <label class="so-label">Filter</label>
+          <div class="so-controls">
+            <button type="button" class="rc-btn" id="rc-bw-dn">&#x25C0;</button>
+            <span id="rc-bw-label" class="rc-bw-label">--</span>
+            <button type="button" class="rc-btn" id="rc-bw-up">&#x25B6;</button>
+          </div>
+        </div>
+        <div class="so-row so-toggles">
+          <div id="rc-nb" class="so-toggle-group">
+            <button type="button" class="rc-btn rc-toggle" id="rc-nb-btn">NB</button>
+          </div>
+          <div id="rc-atu" class="so-toggle-group hidden">
+            <button type="button" class="rc-btn rc-toggle" id="rc-atu-btn">ATU</button>
+          </div>
+          <div id="rc-vfo" class="so-toggle-group">
+            <button type="button" class="rc-btn rc-vfo" id="rc-vfo-a">A</button>
+            <button type="button" class="rc-btn rc-vfo" id="rc-vfo-b">B</button>
+            <button type="button" class="rc-btn" id="rc-vfo-swap">A&#x21C4;B</button>
+          </div>
+        </div>
+        <div id="so-rfgain-row" class="so-row hidden">
+          <label class="so-label">RF Gain</label>
+          <div class="so-slider-wrap">
+            <input type="range" id="rc-rfgain-slider" class="so-slider" min="0" max="100" value="50">
+            <span id="rc-rfgain-val" class="so-slider-val">50</span>
+          </div>
+        </div>
+        <div id="so-txpower-row" class="so-row hidden">
+          <label class="so-label">TX Power</label>
+          <div class="so-slider-wrap">
+            <input type="range" id="rc-txpower-slider" class="so-slider" min="0" max="100" value="100">
+            <span id="rc-txpower-val" class="so-slider-val">100</span>
+          </div>
+        </div>
+
+        <!-- App settings section -->
+        <div class="so-section-label">Spots</div>
+        <div class="so-row">
+          <label class="so-label">Scan Dwell</label>
+          <div class="so-stepper">
+            <button type="button" class="so-step-btn" id="so-dwell-dn">&minus;</button>
+            <span id="so-dwell-val" class="so-step-val">7s</span>
+            <button type="button" class="so-step-btn" id="so-dwell-up">+</button>
+          </div>
+        </div>
+        <div class="so-row">
+          <label class="so-label">Refresh Rate</label>
+          <div class="so-stepper">
+            <button type="button" class="so-step-btn" id="so-refresh-dn">&minus;</button>
+            <span id="so-refresh-val" class="so-step-val">30s</span>
+            <button type="button" class="so-step-btn" id="so-refresh-up">+</button>
+          </div>
+        </div>
+        <div class="so-row">
+          <label class="so-label">Max Spot Age</label>
+          <div class="so-stepper">
+            <button type="button" class="so-step-btn" id="so-maxage-dn">&minus;</button>
+            <span id="so-maxage-val" class="so-step-val">5m</span>
+            <button type="button" class="so-step-btn" id="so-maxage-up">+</button>
+          </div>
+        </div>
+
+        <div class="so-section-label">Display</div>
+        <div class="so-row">
+          <label class="so-label">Distance</label>
+          <div class="so-controls">
+            <button type="button" class="rc-btn rc-toggle" id="so-dist-mi">mi</button>
+            <button type="button" class="rc-btn rc-toggle active" id="so-dist-km">km</button>
+          </div>
+        </div>
+        <div class="so-row">
+          <label class="so-label">CW XIT</label>
+          <div class="so-stepper">
+            <button type="button" class="so-step-btn" id="so-xit-dn">&minus;</button>
+            <span id="so-xit-val" class="so-step-val">0 Hz</span>
+            <button type="button" class="so-step-btn" id="so-xit-up">+</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -107,7 +178,9 @@
     <!-- Tab bar -->
     <div id="tab-bar" class="hidden">
       <button class="tab active" data-tab="spots">Spots</button>
+      <button class="tab" data-tab="map">Map</button>
       <button class="tab" data-tab="log">Log</button>
+      <button class="tab" data-tab="logbook">Logbook</button>
       <button class="tab" data-tab="activate">Activate <span id="tab-activate-badge" class="tab-badge hidden">0</span></button>
     </div>
 
@@ -141,6 +214,16 @@
       <button id="hide-worked-chip" class="filter-chip worked-chip hidden">Hide &#x2713;</button>
     </div>
 
+    <!-- Sort bar -->
+    <div id="sort-bar" class="hidden">
+      <label class="sort-label">Sort</label>
+      <select id="sort-select" class="sort-select">
+        <option value="age">Newest</option>
+        <option value="freq">Frequency</option>
+        <option value="dist">Nearest</option>
+      </select>
+    </div>
+
     <!-- Scan bar -->
     <div id="scan-bar" class="hidden">
       <button id="scan-btn" type="button" class="scan-button">Scan</button>
@@ -149,11 +232,14 @@
     <!-- Spot list -->
     <div id="spot-list"></div>
 
+    <!-- Spot map -->
+    <div id="spot-map" class="hidden"></div>
+
     <!-- Log tab view (standalone logging form) -->
     <div id="log-tab-view" class="hidden">
       <div class="log-tab-content">
         <div id="lt-type-picker" class="log-type-row">
-          <button type="button" class="lt-type-chip active" data-type="dx" style="--type-color:var(--dxc)">DX</button>
+          <button type="button" class="lt-type-chip active" data-type="dx" style="--type-color:var(--dxc)">General</button>
           <button type="button" class="lt-type-chip" data-type="pota" style="--type-color:var(--pota)">POTA</button>
           <button type="button" class="lt-type-chip" data-type="sota" style="--type-color:var(--sota)">SOTA</button>
           <button type="button" class="lt-type-chip" data-type="wwff" style="--type-color:#26a69a">WWFF</button>
@@ -162,6 +248,7 @@
         <div class="log-field">
           <label for="lt-call">Callsign</label>
           <input type="text" id="lt-call" autocapitalize="characters" autocorrect="off" spellcheck="false">
+          <div id="lt-call-info" class="ql-call-info hidden"></div>
           <div id="lt-call-hint" class="ops-hint hidden">Comma-separated for multi-op (e.g. K0OTC, KO6M)</div>
         </div>
         <div id="lt-ref-section" class="log-field hidden">
@@ -182,6 +269,7 @@
               <option value="CW">CW</option>
               <option value="FT8">FT8</option>
               <option value="FT4">FT4</option>
+              <option value="FT2">FT2</option>
               <option value="FM">FM</option>
               <option value="RTTY">RTTY</option>
               <option value="AM">AM</option>
@@ -197,6 +285,9 @@
             <label for="lt-rst-rcvd">RST Rcvd</label>
             <input type="text" id="lt-rst-rcvd" inputmode="numeric" maxlength="3">
           </div>
+        </div>
+        <div class="log-field">
+          <input type="text" id="lt-notes" placeholder="Optional notes" autocorrect="off" spellcheck="false">
         </div>
         <div id="lt-addl-section" class="hidden">
           <label class="log-addl-toggle"><input type="checkbox" id="lt-addl-cb"> Log additional park</label>
@@ -266,6 +357,7 @@
             <option value="CW">CW</option>
             <option value="FT8">FT8</option>
             <option value="FT4">FT4</option>
+            <option value="FT2">FT2</option>
             <option value="FM">FM</option>
             <option value="RTTY">RTTY</option>
             <option value="AM">AM</option>
@@ -273,6 +365,7 @@
           <input type="text" id="ql-rst-sent" inputmode="numeric" maxlength="3" placeholder="S" class="ql-rst" value="59">
           <input type="text" id="ql-rst-rcvd" inputmode="numeric" maxlength="3" placeholder="R" class="ql-rst" value="59">
         </div>
+        <input type="text" id="ql-notes" placeholder="Notes" class="ql-notes" autocorrect="off" spellcheck="false">
       </div>
 
       <!-- Contact list -->
@@ -284,6 +377,15 @@
         <span id="log-footer-queued" class="hidden">0 queued</span>
         <button type="button" id="export-adif-btn" class="export-adif-btn">Export ADIF</button>
       </div>
+    </div>
+
+    <!-- Logbook view -->
+    <div id="logbook-view" class="hidden">
+      <div class="lb-toolbar">
+        <input type="text" id="lb-search" placeholder="Search callsign, park, notes...">
+        <span id="lb-count" class="lb-count"></span>
+      </div>
+      <div id="lb-list" class="lb-list"></div>
     </div>
 
     <!-- Bottom controls -->
@@ -307,7 +409,7 @@
       <h2 class="log-sheet-title">Log QSO</h2>
       <form id="log-form" autocomplete="off">
         <div id="log-type-picker" class="log-type-row">
-          <button type="button" class="log-type-chip" data-type="dx" style="--type-color:var(--dxc)">DX</button>
+          <button type="button" class="log-type-chip" data-type="dx" style="--type-color:var(--dxc)">General</button>
           <button type="button" class="log-type-chip" data-type="pota" style="--type-color:var(--pota)">POTA</button>
           <button type="button" class="log-type-chip" data-type="sota" style="--type-color:var(--sota)">SOTA</button>
           <button type="button" class="log-type-chip" data-type="wwff" style="--type-color:#26a69a">WWFF</button>
@@ -316,6 +418,7 @@
         <div class="log-field">
           <label for="log-call">Callsign</label>
           <input type="text" id="log-call" autocapitalize="characters" autocorrect="off" spellcheck="false">
+          <div id="log-call-info" class="ql-call-info hidden"></div>
         </div>
         <div id="log-ref-section" class="log-field hidden">
           <label for="log-ref-input">Reference</label>
@@ -335,6 +438,7 @@
               <option value="CW">CW</option>
               <option value="FT8">FT8</option>
               <option value="FT4">FT4</option>
+              <option value="FT2">FT2</option>
               <option value="FM">FM</option>
               <option value="RTTY">RTTY</option>
               <option value="AM">AM</option>
@@ -350,6 +454,9 @@
             <label for="log-rst-rcvd">RST Rcvd</label>
             <input type="text" id="log-rst-rcvd" inputmode="numeric" maxlength="3">
           </div>
+        </div>
+        <div class="log-field">
+          <input type="text" id="log-notes" placeholder="Optional notes" autocorrect="off" spellcheck="false">
         </div>
         <div id="log-addl-section" class="hidden">
           <label class="log-addl-toggle"><input type="checkbox" id="log-addl-cb"> Log additional park</label>
@@ -381,8 +488,10 @@
     <!-- Log toast -->
     <div id="log-toast" class="log-toast hidden"></div>
 
-    <!-- Audio element for receiving radio RX audio (must be in DOM for iOS) -->
-    <audio id="remote-audio" playsinline></audio>
+    <!-- Video element for receiving radio RX audio — iOS treats <video> as normal
+         media playback, bypassing Safari's audio processing (AGC/noise suppression/
+         volume limiting) that <audio> elements get with WebRTC streams -->
+    <video id="remote-audio" autoplay playsinline style="display:none;"></video>
 
     <!-- Activation map overlay -->
     <div id="act-map-overlay" class="hidden">

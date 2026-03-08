@@ -113,14 +113,41 @@ html, body {
   height: 100%;
 }
 
-/* --- Rig Selector (inline in rig controls) --- */
-
-.rc-rig-select {
-  background: var(--bg-card); color: var(--text); border: 1px solid #444;
-  border-radius: 6px; height: 32px; font-size: 12px; padding: 0 4px;
-  max-width: 100px;
-  -webkit-appearance: none; appearance: none;
+/* --- Mode Picker Popup --- */
+#mode-picker {
+  position: absolute;
+  top: 44px;
+  left: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-card);
+  border: 1px solid #444;
+  border-radius: 10px;
+  z-index: 60;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  max-width: 220px;
 }
+.mp-btn {
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid #444;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 44px;
+  text-align: center;
+}
+.mp-btn.active {
+  color: var(--pota);
+  border-color: var(--pota);
+  background: rgba(78, 204, 163, 0.15);
+}
+#mode-badge { cursor: pointer; }
+#mode-badge.tappable { border: 1px solid #555; padding: 1px 7px; }
 
 /* --- Status Bar --- */
 #status-bar {
@@ -235,31 +262,85 @@ html, body {
   color: var(--pota);
 }
 
-/* --- Rig Controls Strip --- */
-#rig-controls {
+/* --- Settings Overlay --- */
+#settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.so-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
+  justify-content: space-between;
+  padding: 12px 16px;
   background: var(--bg-header);
   border-bottom: 1px solid #333;
   flex-shrink: 0;
 }
-
-.rc-group {
+.so-title { font-size: 18px; font-weight: 700; color: var(--text); }
+.so-close { background: none; border: none; color: var(--text-dim); font-size: 28px; cursor: pointer; padding: 0 4px; line-height: 1; }
+.so-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 16px 24px;
+}
+.so-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  margin: 16px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #333;
+}
+.so-section-label:first-child { margin-top: 8px; }
+.so-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #1a1a2e;
+  gap: 12px;
 }
-
-.rc-sep {
-  width: 1px;
-  height: 24px;
-  background: #444;
-  flex-shrink: 0;
-  margin: 0 4px;
+.so-label { font-size: 14px; color: var(--text); flex-shrink: 0; }
+.so-controls { display: flex; align-items: center; gap: 4px; }
+.so-select {
+  background: var(--bg-card); color: var(--text); border: 1px solid #444;
+  border-radius: 6px; height: 36px; font-size: 14px; padding: 0 8px;
+  flex: 1; min-width: 0;
+  -webkit-appearance: none; appearance: none;
 }
+.so-toggles { display: flex; gap: 8px; flex-wrap: wrap; }
+.so-toggle-group { display: flex; gap: 4px; align-items: center; }
+.so-slider-wrap { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.so-slider { flex: 1; height: 32px; accent-color: var(--pota); }
+.so-slider-val { font-size: 13px; font-family: monospace; color: var(--text); min-width: 28px; text-align: right; }
+.so-stepper { display: flex; align-items: center; gap: 0; }
+.so-step-btn {
+  width: 36px; height: 36px;
+  font-size: 18px; font-weight: 600;
+  background: var(--bg-card); color: var(--text);
+  border: 1px solid #444; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.so-step-btn:first-child { border-radius: 6px 0 0 6px; }
+.so-step-btn:last-child { border-radius: 0 6px 6px 0; }
+.so-step-btn:active { background: var(--bg-header); border-color: var(--pota); color: var(--pota); }
+.so-step-val {
+  min-width: 52px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600; font-family: monospace;
+  color: var(--text); background: var(--bg);
+  border-top: 1px solid #444; border-bottom: 1px solid #444;
+}
+#settings-overlay.disabled .rc-btn,
+#settings-overlay.disabled .so-step-btn,
+#settings-overlay.disabled .so-slider { opacity: 0.3; pointer-events: none; }
 
 .rc-btn {
   min-width: 36px;
@@ -303,21 +384,6 @@ html, body {
   font-weight: 600;
   color: var(--text);
 }
-
-#rig-controls.disabled .rc-btn {
-  opacity: 0.3;
-  pointer-events: none;
-}
-
-#rig-controls.disabled .rc-slider {
-  opacity: 0.3;
-  pointer-events: none;
-}
-
-.rc-slider-group { gap: 6px; }
-.rc-slider-label { font-size: 11px; font-weight: 600; color: var(--text-dim); min-width: 24px; }
-.rc-slider { flex: 1; max-width: 100px; height: 28px; accent-color: var(--pota); }
-.rc-slider-val { font-size: 12px; font-family: monospace; color: var(--text); min-width: 24px; text-align: right; }
 
 /* --- TX Banner --- */
 #tx-banner {
@@ -406,6 +472,17 @@ html, body {
   color: var(--text);
   border-color: var(--accent);
 }
+
+/* --- Sort Bar --- */
+#sort-bar { display: flex; align-items: center; gap: 8px; padding: 2px 8px 4px; flex-shrink: 0; }
+.sort-label { font-size: 11px; color: var(--text-dim); }
+.sort-select { background: var(--bg-card); color: var(--text); border: 1px solid #444; border-radius: 6px; font-size: 12px; padding: 4px 8px; }
+
+/* --- Spot Distance --- */
+.spot-dist { font-size: 11px; font-family: monospace; color: var(--text-dim); min-width: 50px; text-align: right; flex-shrink: 0; }
+
+/* --- Spot Map --- */
+#spot-map { flex: 1; min-height: 0; }
 
 /* --- Scan Bar --- */
 #scan-bar { display: flex; justify-content: center; padding: 4px 8px; flex-shrink: 0; }
@@ -1452,3 +1529,166 @@ html, body {
 .leaflet-popup-content-wrapper { background: var(--bg-card); color: var(--text); border-radius: 8px; }
 .leaflet-popup-tip { background: var(--bg-card); }
 .leaflet-popup-content { font-size: 13px; }
+
+/* --- Quick Log Notes --- */
+.ql-notes {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--bg);
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* --- Logbook View --- */
+#logbook-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.lb-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+
+#lb-search {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: var(--bg-card);
+  border: 1px solid #444;
+  border-radius: 8px;
+  color: var(--text);
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#lb-search:focus { border-color: var(--accent); }
+
+.lb-count {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lb-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 8px;
+  min-height: 0;
+}
+
+.lb-card {
+  margin-bottom: 4px;
+  background: var(--bg-card);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.lb-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.lb-call { font-weight: 700; font-size: 14px; color: #fff; min-width: 70px; }
+.lb-freq { font-size: 12px; font-family: monospace; color: var(--text); min-width: 55px; }
+.lb-mode { font-size: 10px; padding: 1px 5px; border-radius: 3px; background: #333; color: var(--text-dim); }
+.lb-ref { font-size: 12px; color: var(--pota); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-date { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+
+.lb-detail {
+  padding: 0 12px 12px;
+}
+
+.lb-detail .log-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lb-detail .log-field {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.lb-detail .log-field label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.lb-detail .log-field input,
+.lb-detail .log-field select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--bg);
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.lb-detail .log-field input:focus { border-color: var(--accent); }
+
+.lb-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.lb-save-btn {
+  flex: 1;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--pota);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.lb-save-btn:active { opacity: 0.8; }
+
+.lb-delete-btn {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.lb-delete-btn.confirming {
+  background: var(--accent);
+  color: #fff;
+}
+
+.lb-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-dim);
+  font-size: 14px;
+}

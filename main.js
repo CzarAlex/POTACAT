@@ -116,7 +116,7 @@ const FILTER_PRESETS = {
 function getFilterPresets(mode) {
   const m = (mode || '').toUpperCase();
   if (m === 'CW') return FILTER_PRESETS.CW;
-  if (m === 'FT8' || m === 'FT4' || m === 'DIGU' || m === 'DIGL' || m === 'RTTY' || m === 'PKTUSB' || m === 'PKTLSB') return FILTER_PRESETS.DIG;
+  if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'RTTY' || m === 'PKTUSB' || m === 'PKTLSB') return FILTER_PRESETS.DIG;
   return FILTER_PRESETS.SSB; // default for SSB/USB/LSB/FM/AM
 }
 
@@ -1511,6 +1511,9 @@ function updateRemoteSettings() {
     dxRespotTemplate: settings.dxRespotTemplate || 'Heard in {QTH} 73s {mycallsign} via POTACAT',
     scanDwell: parseInt(settings.scanDwell, 10) || 7,
     refreshInterval: settings.refreshInterval || 30,
+    maxAgeMin: settings.maxAgeMin != null ? settings.maxAgeMin : 5,
+    distUnit: settings.distUnit || 'mi',
+    cwXit: settings.cwXit || 0,
   });
 }
 
@@ -1770,6 +1773,43 @@ function connectRemote() {
     console.log('[Echo CAT] Refresh interval →', val, 's');
   });
 
+  remoteServer.on('set-mode', ({ mode }) => {
+    if (!mode) return;
+    console.log('[Echo CAT] Set mode →', mode);
+    // Reset rate limiter so mode-only change goes through
+    _lastTuneFreq = 0;
+    tuneRadio(_currentFreqHz / 1000, mode);
+  });
+
+  remoteServer.on('set-scan-dwell', ({ value }) => {
+    const val = Math.max(1, parseInt(value, 10) || 7);
+    settings.scanDwell = val;
+    saveSettings(settings);
+    console.log('[Echo CAT] Scan dwell →', val, 's');
+  });
+
+  remoteServer.on('set-max-age', ({ value }) => {
+    const val = Math.max(1, parseInt(value, 10) || 5);
+    settings.maxAgeMin = val;
+    saveSettings(settings);
+    console.log('[Echo CAT] Max spot age →', val, 'm');
+  });
+
+  remoteServer.on('set-dist-unit', ({ value }) => {
+    if (value === 'mi' || value === 'km') {
+      settings.distUnit = value;
+      saveSettings(settings);
+      console.log('[Echo CAT] Distance unit →', value);
+    }
+  });
+
+  remoteServer.on('set-cw-xit', ({ value }) => {
+    const val = Math.max(-999, Math.min(999, parseInt(value, 10) || 0));
+    settings.cwXit = val;
+    saveSettings(settings);
+    console.log('[Echo CAT] CW XIT →', val, 'Hz');
+  });
+
   remoteServer.on('lookup-call', async ({ callsign }) => {
     const call = (callsign || '').toUpperCase().trim();
     if (!call) return;
@@ -1853,6 +1893,61 @@ function connectRemote() {
     }
   });
 
+  remoteServer.on('get-all-qsos', () => {
+    try {
+      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      const qsos = parseAllRawQsos(logPath);
+      // Send with idx so phone can reference by index for edit/delete
+      const mapped = qsos.map((q, i) => ({ idx: i, ...q }));
+      remoteServer.sendAllQsos(mapped);
+    } catch (err) {
+      console.error('[Echo CAT] get-all-qsos error:', err.message);
+      remoteServer.sendAllQsos([]);
+    }
+  });
+
+  remoteServer.on('update-qso', ({ idx, fields }) => {
+    try {
+      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      const qsos = parseAllRawQsos(logPath);
+      if (idx < 0 || idx >= qsos.length) {
+        remoteServer.sendQsoUpdated({ success: false, idx, error: 'Invalid index' });
+        return;
+      }
+      Object.assign(qsos[idx], fields);
+      rewriteAdifFile(logPath, qsos);
+      loadWorkedQsos();
+      // Notify desktop QSO pop-out
+      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+        qsoPopoutWin.webContents.send('qso-popout-updated', { idx, fields });
+      }
+      remoteServer.sendQsoUpdated({ success: true, idx, fields });
+    } catch (err) {
+      remoteServer.sendQsoUpdated({ success: false, idx, error: err.message });
+    }
+  });
+
+  remoteServer.on('delete-qso', ({ idx }) => {
+    try {
+      const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+      const qsos = parseAllRawQsos(logPath);
+      if (idx < 0 || idx >= qsos.length) {
+        remoteServer.sendQsoDeleted({ success: false, idx, error: 'Invalid index' });
+        return;
+      }
+      qsos.splice(idx, 1);
+      rewriteAdifFile(logPath, qsos);
+      loadWorkedQsos();
+      // Notify desktop QSO pop-out
+      if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) {
+        qsoPopoutWin.webContents.send('qso-popout-deleted', idx);
+      }
+      remoteServer.sendQsoDeleted({ success: true, idx });
+    } catch (err) {
+      remoteServer.sendQsoDeleted({ success: false, idx, error: err.message });
+    }
+  });
+
   remoteServer.on('log-qso', async (data) => {
     if (!data || !data.callsign) {
       remoteServer.sendLogResult({ success: false, error: 'Missing callsign' });
@@ -1868,7 +1963,11 @@ function connectRemote() {
 
       const sig = data.sig || '';
       const sigInfo = data.sigInfo || '';
-      const comment = sigInfo ? `[${sig} ${sigInfo}]` : '';
+      const userComment = (data.userComment || '').trim();
+      let comment = '';
+      if (sigInfo && userComment) comment = `[${sig} ${sigInfo}] ${userComment}`;
+      else if (sigInfo) comment = `[${sig} ${sigInfo}]`;
+      else comment = userComment;
 
       const qsoData = {
         callsign: data.callsign.toUpperCase(),
@@ -3817,7 +3916,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     filterWidth = settings.cwFilterWidth || 0;
   } else if (m === 'SSB' || m === 'USB' || m === 'LSB') {
     filterWidth = settings.ssbFilterWidth || 0;
-  } else if (m === 'FT8' || m === 'FT4' || m === 'DIGU' || m === 'DIGL') {
+  } else if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL') {
     filterWidth = settings.digitalFilterWidth || 0;
   }
 
@@ -3829,7 +3928,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
       const sliceIndex = (settings.catTarget.port || 5002) - 5002;
       const freqMhz = freqHz / 1e6;
-      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR')
+      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR')
         ? 'DIGU' : (mode === 'CW' ? 'CW' : (mode === 'SSB' || mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null)));
       sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}→${flexMode} filter=${filterWidth}`);
       smartSdr.tuneSlice(sliceIndex, freqMhz, flexMode, filterWidth);

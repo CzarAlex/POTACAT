@@ -1229,7 +1229,7 @@ rbnAgeUnitSelect.addEventListener('change', rerenderRbn);
 const DXCC_MODE_GROUPS = {
   phone:   new Set(['SSB', 'AM', 'FM', 'USB', 'LSB']),
   cw:      new Set(['CW']),
-  digital: new Set(['FT8', 'FT4', 'RTTY', 'PSK31', 'JT65', 'JT9', 'DATA', 'OLIVIA', 'MFSK'])
+  digital: new Set(['FT8', 'FT4', 'FT2', 'RTTY', 'PSK31', 'JT65', 'JT9', 'DATA', 'OLIVIA', 'MFSK'])
 };
 const DXCC_CHALLENGE_BANDS = ['160m', '80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m', '6m']; // excludes 60m per ARRL rules
 
@@ -2956,7 +2956,7 @@ const SOURCE_LABELS = {
   pota: 'POTA', sota: 'SOTA', dxc: 'DX', rbn: 'RBN',
   wwff: 'WWFF', llota: 'LLOTA', pskr: 'FreeDV', net: 'NET',
 };
-const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
+const CW_DIGI_MODES = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 const PHONE_MODES = new Set(['SSB', 'USB', 'LSB', 'FM', 'AM']);
 
 function isOutOfPrivilege(freqKhz, mode, cls) {
@@ -4428,7 +4428,7 @@ function formatAge(isoStr) {
 }
 
 // --- QSO Logging ---
-const CW_DIGI_MODES_SET = new Set(['CW', 'FT8', 'FT4', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
+const CW_DIGI_MODES_SET = new Set(['CW', 'FT8', 'FT4', 'FT2', 'RTTY', 'DIGI', 'JS8', 'PSK31', 'PSK']);
 
 // Band lookup for ADIF (frequency in kHz → band string)
 const BAND_RANGES = [
@@ -8263,7 +8263,7 @@ activatorLogBody.addEventListener('dblclick', (e) => {
     // Use a dropdown for mode
     const select = document.createElement('select');
     select.className = 'act-log-edit-select';
-    const modes = ['SSB', 'CW', 'FT8', 'FT4', 'FM', 'RTTY', 'PSK31', 'USB', 'LSB', 'AM'];
+    const modes = ['SSB', 'CW', 'FT8', 'FT4', 'FT2', 'FM', 'RTTY', 'PSK31', 'USB', 'LSB', 'AM'];
     for (const m of modes) {
       const opt = document.createElement('option');
       opt.value = m;
@@ -9460,6 +9460,7 @@ function updateActivatorModeFromCat(mode) {
   else if (m === 'FM') activatorModeSelect.value = 'FM';
   else if (m === 'FT8') activatorModeSelect.value = 'FT8';
   else if (m === 'FT4') activatorModeSelect.value = 'FT4';
+  else if (m === 'FT2') activatorModeSelect.value = 'FT2';
   else if (m === 'RTTY') activatorModeSelect.value = 'RTTY';
 }
 
