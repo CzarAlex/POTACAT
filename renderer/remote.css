@@ -1169,6 +1169,16 @@ html, body {
 
 #ql-call:focus { border-color: var(--pota); }
 
+.ql-call-info {
+  font-size: 12px;
+  color: var(--pota);
+  padding: 0 4px;
+  margin: -2px 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ql-log-btn {
   padding: 10px 20px;
   font-size: 16px;

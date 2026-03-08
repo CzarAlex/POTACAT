@@ -1245,10 +1245,12 @@ function connectWsjtx() {
     try {
       const f = parseAdifRecord(adif);
       const freqMHz = parseFloat(f.FREQ || '0');
+      // WSJT-X sends MODE=MFSK + SUBMODE=FT4; prefer SUBMODE when available
+      const wsjtxMode = f.SUBMODE || f.MODE || '';
       const qsoData = {
         callsign: f.CALL || '',
         frequency: String(Math.round(freqMHz * 1000)),
-        mode: f.MODE || '',
+        mode: wsjtxMode,
         qsoDate: f.QSO_DATE || '',
         timeOn: f.TIME_ON || '',
         rstSent: f.RST_SENT || '',
@@ -1766,6 +1768,35 @@ function connectRemote() {
     if (spotTimer) clearInterval(spotTimer);
     spotTimer = setInterval(refreshSpots, val * 1000);
     console.log('[Echo CAT] Refresh interval →', val, 's');
+  });
+
+  remoteServer.on('lookup-call', async ({ callsign }) => {
+    const call = (callsign || '').toUpperCase().trim();
+    if (!call) return;
+    let name = '';
+    let location = '';
+    // Try QRZ first (has operator name)
+    if (qrz.configured && settings.enableQrz) {
+      try {
+        const r = await qrz.lookup(call);
+        if (r) {
+          name = r.nickname || r.fname || '';
+          if (r.name && name) name += ' ' + r.name;
+          else if (r.name) name = r.name;
+          const parts = [];
+          if (r.addr2) parts.push(r.addr2);
+          if (r.state) parts.push(r.state);
+          if (r.country && r.country !== 'United States') parts.push(r.country);
+          location = parts.join(', ');
+        }
+      } catch {}
+    }
+    // Fallback to cty.dat for country
+    if (!name && !location && ctyDb) {
+      const entity = resolveCallsign(call, ctyDb);
+      if (entity) location = entity.name || '';
+    }
+    remoteServer.sendCallLookup({ callsign: call, name, location });
   });
 
   remoteServer.on('get-past-activations', () => {

@@ -10,6 +10,7 @@
   let pttDown = false;
   let storedToken = '';
   let reconnectTimer = null;
+  let wasKicked = false;
   let pingInterval = null;
   let lastPingSent = 0;
 
@@ -156,6 +157,8 @@
   const qlRstSent = document.getElementById('ql-rst-sent');
   const qlRstRcvd = document.getElementById('ql-rst-rcvd');
   const qlLogBtn = document.getElementById('ql-log-btn');
+  const qlCallInfo = document.getElementById('ql-call-info');
+  let callLookupTimer = null;
   const contactList = document.getElementById('contact-list');
   const logFooter = document.getElementById('log-footer');
   const logFooterCount = document.getElementById('log-footer-count');
@@ -255,6 +258,7 @@
   });
 
   function connect(token) {
+    wasKicked = false;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       ws.close();
     }
@@ -277,6 +281,7 @@
     ws.onclose = () => {
       clearInterval(pingInterval);
       pingInterval = null;
+      if (wasKicked) return; // don't auto-reconnect after kick
       if (mainUI.classList.contains('hidden')) {
         connectBtn.textContent = 'Connect';
         connectBtn.disabled = false;
@@ -350,8 +355,15 @@
         break;
 
       case 'kicked':
-        alert('Disconnected: another client connected');
-        location.reload();
+        // Stop reconnect loop — another client took over intentionally
+        wasKicked = true;
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        mainUI.classList.add('hidden');
+        connectScreen.classList.remove('hidden');
+        connectError.textContent = 'Another client connected. Tap Connect to take over.';
+        connectError.classList.remove('hidden');
+        connectBtn.textContent = 'Connect';
+        connectBtn.disabled = false;
         break;
 
       case 'sources':
@@ -410,6 +422,10 @@
 
       case 'cluster-state':
         clusterConnected = !!msg.connected;
+        break;
+
+      case 'call-lookup':
+        showCallLookup(msg);
         break;
 
       case 'park-results':
@@ -1732,6 +1748,37 @@
     qlRstRcvd.value = rst;
   });
 
+  // --- Callsign lookup (name/QTH) on quick-log ---
+  qlCall.addEventListener('input', () => {
+    if (callLookupTimer) clearTimeout(callLookupTimer);
+    const call = qlCall.value.trim().toUpperCase();
+    if (call.length < 3) {
+      qlCallInfo.classList.add('hidden');
+      qlCallInfo.textContent = '';
+      return;
+    }
+    callLookupTimer = setTimeout(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'lookup-call', callsign: call }));
+      }
+    }, 400);
+  });
+
+  function showCallLookup(msg) {
+    const currentCall = qlCall.value.trim().toUpperCase();
+    if (msg.callsign !== currentCall) return; // stale response
+    const parts = [];
+    if (msg.name) parts.push(msg.name);
+    if (msg.location) parts.push(msg.location);
+    if (parts.length) {
+      qlCallInfo.textContent = parts.join(' \u2014 ');
+      qlCallInfo.classList.remove('hidden');
+    } else {
+      qlCallInfo.classList.add('hidden');
+      qlCallInfo.textContent = '';
+    }
+  }
+
   function submitQuickLog() {
     const call = qlCall.value.trim().toUpperCase();
     if (!call) { qlCall.focus(); return; }
@@ -1782,6 +1829,8 @@
     }
 
     qlCall.value = '';
+    qlCallInfo.classList.add('hidden');
+    qlCallInfo.textContent = '';
     qlCall.focus();
     if (currentFreqKhz) qlFreq.value = String(Math.round(currentFreqKhz * 10) / 10);
   }
