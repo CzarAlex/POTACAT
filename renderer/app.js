@@ -7641,59 +7641,15 @@ document.getElementById('welcome-rig-search').addEventListener('input', () => {
 });
 
 // Welcome import buttons
-document.getElementById('welcome-import-adif').addEventListener('click', async () => {
-  const resultEl = document.getElementById('welcome-adif-result');
-  resultEl.textContent = 'Importing...';
-  resultEl.className = 'welcome-import-result';
-  try {
-    const result = await window.api.importAdif();
-    if (!result) {
-      resultEl.textContent = '';
-    } else if (result.success) {
-      resultEl.textContent = `${result.imported} QSOs imported`;
-      resultEl.className = 'welcome-import-result success';
-    } else {
-      resultEl.textContent = 'Import failed';
-      resultEl.className = 'welcome-import-result error';
-    }
-  } catch (err) {
-    resultEl.textContent = 'Import failed';
-    resultEl.className = 'welcome-import-result error';
-  }
-});
-
-document.getElementById('welcome-import-parks').addEventListener('click', async () => {
-  const resultEl = document.getElementById('welcome-parks-result');
-  try {
-    const filePath = await window.api.choosePotaParksFile();
-    if (filePath) {
-      const currentSettings = await window.api.getSettings();
-      await window.api.saveSettings(Object.assign({}, currentSettings, { potaParksPath: filePath }));
-      resultEl.textContent = 'Parks loaded';
-      resultEl.className = 'welcome-import-result success';
-    }
-  } catch (err) {
-    resultEl.textContent = 'Load failed';
-    resultEl.className = 'welcome-import-result error';
-  }
-});
-
-document.getElementById('welcome-pota-csv-link').addEventListener('click', (e) => {
-  e.preventDefault();
-  window.api.openExternal('https://pota.app');
-});
-
 document.getElementById('welcome-start').addEventListener('click', async () => {
   const myCallsign = (welcomeCallsignInput.value.trim() || '').toUpperCase();
   const grid = welcomeGridInput.value.trim() || 'FN20jb';
   const distUnitVal = document.getElementById('welcome-dist-unit').value;
   const licenseClassVal = document.getElementById('welcome-license-class').value;
   const hideOobChecked = document.getElementById('welcome-hide-oob').checked;
-  const enablePotaVal = document.getElementById('welcome-enable-pota').checked;
-  const enableSotaVal = document.getElementById('welcome-enable-sota').checked;
-  const enableWwffVal = document.getElementById('welcome-enable-wwff') ? document.getElementById('welcome-enable-wwff').checked : false;
-  const enableLlotaVal = document.getElementById('welcome-enable-llota') ? document.getElementById('welcome-enable-llota').checked : false;
   const lightModeEnabled = welcomeLightMode.checked;
+  const qrzUser = (document.getElementById('welcome-qrz-user')?.value || '').trim().toUpperCase();
+  const qrzPass = document.getElementById('welcome-qrz-pass')?.value || '';
   const currentSettings = await window.api.getSettings();
 
   // Merge with existing settings so upgrade doesn't wipe user preferences
@@ -7706,13 +7662,14 @@ document.getElementById('welcome-start').addEventListener('click', async () => {
     hideOutOfBand: hideOobChecked,
     firstRun: false,
     lastVersion: currentSettings.appVersion,
-    enablePota: enablePotaVal,
-    enableSota: enableSotaVal,
-    enableWwff: enableWwffVal,
-    enableLlota: enableLlotaVal,
     lightMode: lightModeEnabled,
-    appMode: document.querySelector('input[name="welcome-app-mode"]:checked')?.value || 'hunter',
   };
+  // Only set QRZ if user filled it in (don't overwrite existing with blank)
+  if (qrzUser) {
+    saveData.qrzUsername = qrzUser;
+    saveData.enableQrz = true;
+  }
+  if (qrzPass) saveData.qrzPassword = qrzPass;
   delete saveData.appVersion; // runtime-only, don't persist
 
   // Add rig if configured in welcome
@@ -7747,12 +7704,10 @@ async function checkFirstRun(force = false) {
       if (s.distUnit) document.getElementById('welcome-dist-unit').value = s.distUnit;
       if (s.licenseClass) document.getElementById('welcome-license-class').value = s.licenseClass;
       document.getElementById('welcome-hide-oob').checked = s.hideOutOfBand === true;
-      document.getElementById('welcome-enable-pota').checked = s.enablePota !== false;
-      document.getElementById('welcome-enable-sota').checked = s.enableSota === true;
-      if (document.getElementById('welcome-enable-wwff')) document.getElementById('welcome-enable-wwff').checked = s.enableWwff === true;
-      if (document.getElementById('welcome-enable-llota')) document.getElementById('welcome-enable-llota').checked = s.enableLlota === true;
-      const welcomeModeRadio = document.querySelector(`input[name="welcome-app-mode"][value="${s.appMode || 'hunter'}"]`);
-      if (welcomeModeRadio) welcomeModeRadio.checked = true;
+      const welcomeQrzUser = document.getElementById('welcome-qrz-user');
+      const welcomeQrzPass = document.getElementById('welcome-qrz-pass');
+      if (welcomeQrzUser) welcomeQrzUser.value = s.qrzUsername || '';
+      if (welcomeQrzPass) welcomeQrzPass.value = s.qrzPassword || '';
       welcomeLightMode.checked = s.lightMode === true;
       // Show existing active rig if any
       const rigs = s.rigs || [];

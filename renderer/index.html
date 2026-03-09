@@ -1333,12 +1333,27 @@
 
   <!-- Welcome dialog (first run) -->
   <dialog id="welcome-dialog">
-    <h3>Welcome to POTACAT</h3>
-    <p class="welcome-text">Let's get you set up. You can configure your radio any time in Settings.</p>
+    <h3>POTACAT: Democratizing Remote Radio</h3>
+    <p class="welcome-text">Here are some quick settings to get you up and running. There are many more inside the Settings menu.</p>
+
+    <div class="welcome-section-label">Display</div>
+    <label class="switch-label welcome-theme-switch">
+      <span>Dark Mode</span>
+      <div class="switch">
+        <input type="checkbox" id="welcome-light-mode">
+        <span class="switch-slider"></span>
+      </div>
+      <span>Light Mode</span>
+    </label>
+    <div class="welcome-field">
+      <span style="font-weight:600;font-size:13px;">Change Font Size</span>
+      <span class="help-text" style="display:block;margin-top:2px;">Press <kbd>Ctrl +</kbd> to make text larger, <kbd>Ctrl &minus;</kbd> to make smaller, <kbd>Ctrl 0</kbd> to reset</span>
+    </div>
+
+    <div class="welcome-section-label">Station</div>
     <label class="welcome-field">Callsign: <input type="text" id="welcome-callsign" maxlength="10" placeholder="WB6ACU" style="text-transform:uppercase;"></label>
-    <span class="help-text" style="margin-top:-4px;margin-bottom:8px;display:block;">Required for DX Cluster login and QSO logging</span>
     <label class="welcome-field">QTH Grid Square: <input type="text" id="welcome-grid" maxlength="6" placeholder="FN20jb"></label>
-    <span class="help-text" style="margin-top:-4px;margin-bottom:8px;display:block;">Used to calculate distance from you to each spot</span>
+    <span class="help-text" style="margin-top:-4px;margin-bottom:8px;display:block;">Used for distance calculation, DX Cluster login, and QSO logging</span>
     <div style="display:flex;gap:8px;">
       <label class="welcome-field" style="flex:1;">Distance Unit:
         <select id="welcome-dist-unit">
@@ -1365,52 +1380,23 @@
     <label class="checkbox-label" style="margin-top:4px;margin-bottom:8px;">
       <input type="checkbox" id="welcome-hide-oob"> Hide out-of-privilege spots
     </label>
-    <span class="help-text" style="margin-top:-4px;margin-bottom:8px;display:block;">Don't be tempted by activators you can't work with your privileges!</span>
-    <div style="display:flex;gap:12px;margin-bottom:8px;">
-      <label class="checkbox-label"><input type="checkbox" id="welcome-enable-pota" checked> POTA spots</label>
-      <label class="checkbox-label"><input type="checkbox" id="welcome-enable-sota" checked> SOTA spots</label>
-      <label class="checkbox-label"><input type="checkbox" id="welcome-enable-wwff"> WWFF spots</label>
-      <label class="checkbox-label"><input type="checkbox" id="welcome-enable-llota"> LLOTA spots</label>
+
+    <div class="welcome-section-label">QRZ Lookup (optional)</div>
+    <span class="help-text" style="display:block;margin-bottom:6px;">Shows operator name, location, and callsign details on spots. Requires a QRZ account.</span>
+    <div style="display:flex;gap:8px;">
+      <label class="welcome-field" style="flex:1;">Username:
+        <input type="text" id="welcome-qrz-user" maxlength="10" placeholder="K3SBP" style="text-transform:uppercase;">
+      </label>
+      <label class="welcome-field" style="flex:1;">Password:
+        <input type="password" id="welcome-qrz-pass" placeholder="QRZ password">
+      </label>
     </div>
-    <div style="display:flex;gap:16px;align-items:center;margin-bottom:8px;">
-      <span style="font-weight:600;font-size:13px;">Start as:</span>
-      <label class="radio-label"><input type="radio" name="welcome-app-mode" value="hunter" checked> Hunter</label>
-      <label class="radio-label"><input type="radio" name="welcome-app-mode" value="activator"> Activator</label>
-      <span class="help-text" style="font-size:11px;color:#888;">You can switch any time in Settings</span>
-    </div>
-    <div class="welcome-import-section">
-      <div style="font-weight:bold;margin-bottom:4px;">Import Your Data (optional)</div>
-      <span class="help-text" style="display:block;margin-bottom:8px;">Already have QSO history or POTA park data? Import now to see worked indicators from the start.</span>
-      <div class="welcome-import-row">
-        <div class="welcome-import-info">
-          <div style="font-weight:bold;">QSO History</div>
-          <div class="help-text">ADIF or Log4OM SQLite from LoTW, QRZ, POTA, or any logger</div>
-        </div>
-        <button type="button" id="welcome-import-adif" class="welcome-import-btn">Browse</button>
-        <span id="welcome-adif-result" class="welcome-import-result"></span>
-      </div>
-      <div class="welcome-import-row">
-        <div class="welcome-import-info">
-          <div style="font-weight:bold;">POTA Parks Worked</div>
-          <div class="help-text">CSV from <a href="#" id="welcome-pota-csv-link">pota.app</a></div>
-        </div>
-        <button type="button" id="welcome-import-parks" class="welcome-import-btn">Browse</button>
-        <span id="welcome-parks-result" class="welcome-import-result"></span>
-      </div>
-    </div>
-    <label class="switch-label welcome-theme-switch">
-      <span>Dark Mode</span>
-      <div class="switch">
-        <input type="checkbox" id="welcome-light-mode">
-        <span class="switch-slider"></span>
-      </div>
-      <span>Light Mode</span>
-    </label>
+
     <div class="welcome-radio-section">
-      <div style="font-weight:bold;margin-bottom:4px;">Add Your Radio (optional)</div>
+      <div class="welcome-section-label" style="margin-top:0;">Add Your Radio (optional)</div>
       <span class="help-text" style="display:block;margin-bottom:8px;">
         You may need to check out the <a href="#" id="welcome-radio-help-link">Set Up My Radio</a>
-        section of the website. You can always edit your radio settings in Settings.
+        section of the website. You can always edit your radio in Settings.
         Additional help can be found on the <a href="#" id="welcome-radio-discord-link">POTACAT Discord</a>.
       </span>
       <div id="welcome-rig-display" class="hidden"></div>
@@ -1496,7 +1482,7 @@
       </div>
     </div>
     <div class="welcome-beta-note">
-      POTACAT is in beta and we're working toward a strong v1 release. We're still collecting feedback on radio settings that work for each rig. Please visit the <a href="#" id="welcome-discord-link">Discord</a> and share a rig report on what you're integrating &mdash; every tester helps!
+      POTACAT is in active development. If you experience a bug, have difficulty connecting your radio, or have a feature request, please join the <a href="#" id="welcome-discord-link">Discord</a> and ask for help. Be verbose in your requests and bug reports &mdash; share your rig, operating system, and exactly what you did and what did not work.
     </div>
     <div class="dialog-buttons" style="margin-top:12px;">
       <button type="button" id="welcome-start" class="log-save-btn">Get Started</button>
