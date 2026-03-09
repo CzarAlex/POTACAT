@@ -1159,9 +1159,22 @@ function initMultiDropdown(container, label, onChange) {
   const menu = container.querySelector('.multi-dropdown-menu');
   const textEl = container.querySelector('.multi-dropdown-text');
   const allCb = menu.querySelector('input[value="all"]');
-  const itemCbs = [...menu.querySelectorAll('input:not([value="all"])')];
+  const radioCb = menu.querySelector('input[value="radio"]');  // only exists on band & mode filters
+  const itemCbs = [...menu.querySelectorAll('input:not([value="all"]):not([value="radio"])')];
+
+  container._updateText = updateText;
 
   function updateText() {
+    if (radioCb && radioCb.checked) {
+      let detail = null;
+      if (label === 'Band') {
+        detail = radioFreqKhz ? freqToBandActivator(radioFreqKhz) : null;
+      } else if (label === 'Mode') {
+        detail = radioMode ? radioModeToFilter(radioMode) : null;
+      }
+      textEl.textContent = detail ? `Radio (${detail})` : 'Radio';
+      return;
+    }
     const checked = itemCbs.filter((cb) => cb.checked);
     if (allCb.checked || checked.length === 0) {
       textEl.textContent = 'All';
@@ -1188,10 +1201,21 @@ function initMultiDropdown(container, label, onChange) {
     const cb = e.target;
     if (cb.value === 'all') {
       const nowChecked = cb.checked;
+      if (radioCb) radioCb.checked = false;
       itemCbs.forEach((c) => { c.checked = nowChecked; });
+    } else if (cb.value === 'radio') {
+      // Radio is exclusive — uncheck All and all individual bands
+      if (cb.checked) {
+        allCb.checked = false;
+        itemCbs.forEach((c) => { c.checked = false; });
+      } else {
+        // Unchecking Radio with nothing else → fall back to All
+        allCb.checked = true;
+      }
     } else {
-      // Uncheck "All" when toggling individual items
+      // Uncheck "All" and "Radio" when toggling individual items
       allCb.checked = false;
+      if (radioCb) radioCb.checked = false;
       // If nothing checked, check "All"
       if (itemCbs.every((c) => !c.checked)) allCb.checked = true;
       // If everything checked, switch to "All"
@@ -1211,7 +1235,17 @@ function initMultiDropdown(container, label, onChange) {
 function getDropdownValues(container) {
   const allCb = container.querySelector('input[value="all"]');
   if (allCb.checked) return null;
-  const checked = [...container.querySelectorAll('input:not([value="all"]):checked')];
+  const radioCb = container.querySelector('input[value="radio"]');
+  if (radioCb && radioCb.checked) {
+    if (container === bandFilterEl) {
+      const band = radioFreqKhz ? freqToBandActivator(radioFreqKhz) : null;
+      return band ? new Set([band]) : null;
+    } else if (container === modeFilterEl) {
+      const mode = radioMode ? radioModeToFilter(radioMode) : null;
+      return mode ? new Set([mode]) : null;
+    }
+  }
+  const checked = [...container.querySelectorAll('input:not([value="all"]):not([value="radio"]):checked')];
   if (checked.length === 0) return null;
   return new Set(checked.map((cb) => cb.value));
 }
@@ -1338,12 +1372,18 @@ function playTuneClick() {
 const FILTERS_KEY = 'pota-cat-filters';
 
 function saveFilters() {
-  const bands = getDropdownValues(bandFilterEl);
-  const modes = getDropdownValues(modeFilterEl);
+  const bandRadioCb = bandFilterEl.querySelector('input[value="radio"]');
+  const bandRadio = bandRadioCb && bandRadioCb.checked;
+  const modeRadioCb = modeFilterEl.querySelector('input[value="radio"]');
+  const modeRadio = modeRadioCb && modeRadioCb.checked;
+  const bands = bandRadio ? null : getDropdownValues(bandFilterEl);
+  const modes = modeRadio ? null : getDropdownValues(modeFilterEl);
   const continents = getDropdownValues(continentFilterEl);
   const data = {
     bands: bands ? [...bands] : null,
+    bandRadio,
     modes: modes ? [...modes] : null,
+    modeRadio,
     continents: continents ? [...continents] : null,
     maxAgeMin,
   };
@@ -1356,10 +1396,17 @@ function restoreFilters() {
     if (!data) return;
 
     // Restore band checkboxes
-    if (data.bands) {
+    if (data.bandRadio) {
+      bandFilterEl.querySelector('input[value="all"]').checked = false;
+      const radioCb = bandFilterEl.querySelector('input[value="radio"]');
+      if (radioCb) radioCb.checked = true;
+      bandFilterEl.querySelectorAll('input:not([value="all"]):not([value="radio"])').forEach((cb) => { cb.checked = false; });
+    } else if (data.bands) {
       const bandSet = new Set(data.bands);
       bandFilterEl.querySelector('input[value="all"]').checked = false;
-      bandFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => {
+      const radioCb = bandFilterEl.querySelector('input[value="radio"]');
+      if (radioCb) radioCb.checked = false;
+      bandFilterEl.querySelectorAll('input:not([value="all"]):not([value="radio"])').forEach((cb) => {
         cb.checked = bandSet.has(cb.value);
       });
     } else {
@@ -1368,10 +1415,17 @@ function restoreFilters() {
     }
 
     // Restore mode checkboxes
-    if (data.modes) {
+    if (data.modeRadio) {
+      modeFilterEl.querySelector('input[value="all"]').checked = false;
+      const radioCb = modeFilterEl.querySelector('input[value="radio"]');
+      if (radioCb) radioCb.checked = true;
+      modeFilterEl.querySelectorAll('input:not([value="all"]):not([value="radio"])').forEach((cb) => { cb.checked = false; });
+    } else if (data.modes) {
       const modeSet = new Set(data.modes);
       modeFilterEl.querySelector('input[value="all"]').checked = false;
-      modeFilterEl.querySelectorAll('input:not([value="all"])').forEach((cb) => {
+      const radioCb = modeFilterEl.querySelector('input[value="radio"]');
+      if (radioCb) radioCb.checked = false;
+      modeFilterEl.querySelectorAll('input:not([value="all"]):not([value="radio"])').forEach((cb) => {
         cb.checked = modeSet.has(cb.value);
       });
     } else {
@@ -2080,6 +2134,20 @@ function modeMatches(spotMode, selectedModes) {
   if (selectedModes.has(spotMode)) return true;
   if (selectedModes.has('SSB') && (spotMode === 'USB' || spotMode === 'LSB')) return true;
   return false;
+}
+
+/** Map CAT radio mode (USB, LSB, CW, FM, RTTY, etc.) to filter category. */
+function radioModeToFilter(catMode) {
+  if (!catMode) return null;
+  const m = catMode.toUpperCase();
+  if (m === 'CW' || m === 'CW-L' || m === 'CWL' || m === 'CW-U' || m === 'CWU' || m === 'CWR') return 'CW';
+  if (m === 'USB' || m === 'LSB' || m === 'SSB' || m === 'AM') return 'SSB';
+  if (m === 'FM' || m === 'NFM' || m === 'WFM' || m === 'FM-N' || m === 'FMN') return 'FM';
+  if (m === 'RTTY' || m === 'RTTY-U' || m === 'RTTY-L' || m === 'RTTYR' || m === 'RTTY-LSB' || m === 'RTTY-USB') return 'RTTY';
+  if (m === 'FT8') return 'FT8';
+  if (m === 'FT4') return 'FT4';
+  if (m === 'FREEDV') return 'FREEDV';
+  return null;
 }
 
 function spotAgeSecs(spotTime) {
@@ -6488,13 +6556,27 @@ window.api.onWsjtxActivatorQso((contact) => {
 window.api.onCatFrequency((hz) => {
   const newKhz = Math.round(hz / 1000);
   if (newKhz === radioFreqKhz) return;
+  const oldBand = radioFreqKhz ? freqToBandActivator(radioFreqKhz) : null;
   radioFreqKhz = newKhz;
+  const newBand = freqToBandActivator(newKhz);
+  // Update band filter text and re-filter when band changes in Radio mode
+  const radioBandCb = bandFilterEl.querySelector('input[value="radio"]');
+  if (radioBandCb && radioBandCb.checked && newBand !== oldBand) {
+    if (bandFilterEl._updateText) bandFilterEl._updateText();
+  }
   playTuneClick();
   if (showTable || showMap) render();
 });
 
 window.api.onCatMode((mode) => {
+  const oldFilter = radioMode ? radioModeToFilter(radioMode) : null;
   radioMode = mode;
+  const newFilter = radioModeToFilter(mode);
+  const radioModeCb = modeFilterEl.querySelector('input[value="radio"]');
+  if (radioModeCb && radioModeCb.checked && newFilter !== oldFilter) {
+    if (modeFilterEl._updateText) modeFilterEl._updateText();
+    if (showTable || showMap) render();
+  }
 });
 
 let radioPower = 0; // last known TX power from CAT (watts)
