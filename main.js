@@ -20,7 +20,7 @@ const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./
 const { TciClient, setTciColorblindMode } = require('./lib/tci');
 const { IambicKeyer } = require('./lib/keyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
-const { WsjtxClient } = require('./lib/wsjtx');
+const { WsjtxClient, encodeHeartbeat, encodeLoggedAdif } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const { RemoteServer } = require('./lib/remote-server');
 const { fetchSpots: fetchWwffSpots } = require('./lib/wwff');
@@ -2917,6 +2917,63 @@ function loadWorkedParks() {
   }
 }
 
+// --- HamRS bridge (WSJT-X binary protocol) ---
+// HamRS expects WSJT-X binary UDP messages, not plain ADIF text.
+// We send periodic heartbeats so HamRS shows "connected", and Logged ADIF (type 12) for QSOs.
+const hamrsBridge = {
+  socket: null,
+  heartbeatTimer: null,
+  host: '127.0.0.1',
+  port: 2333,
+  id: 'POTACAT',
+
+  start(host, port) {
+    this.stop();
+    this.host = host || '127.0.0.1';
+    this.port = port || 2333;
+    const dgram = require('dgram');
+    this.socket = dgram.createSocket('udp4');
+    this.socket.on('error', (err) => {
+      console.error('[HamRS] UDP error:', err.message);
+    });
+    // Send heartbeat immediately, then every 15 seconds
+    this._sendHeartbeat();
+    this.heartbeatTimer = setInterval(() => this._sendHeartbeat(), 15000);
+    console.log(`[HamRS] Bridge started → ${this.host}:${this.port}`);
+  },
+
+  stop() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.socket) {
+      try { this.socket.close(); } catch { /* ignore */ }
+      this.socket = null;
+    }
+  },
+
+  _sendHeartbeat() {
+    if (!this.socket) return;
+    const buf = encodeHeartbeat(this.id, 3);
+    this.socket.send(buf, 0, buf.length, this.port, this.host);
+  },
+
+  sendQso(adifText) {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) {
+        reject(new Error('HamRS bridge not started'));
+        return;
+      }
+      const buf = encodeLoggedAdif(this.id, adifText);
+      this.socket.send(buf, 0, buf.length, this.port, this.host, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  },
+};
+
 // --- Logbook forwarding ---
 function forwardToLogbook(qsoData) {
   const type = settings.logbookType;
@@ -2927,7 +2984,14 @@ function forwardToLogbook(qsoData) {
     return sendUdpAdif(qsoData, host, port || 2237);
   }
   if (type === 'hamrs') {
-    return sendUdpAdif(qsoData, host, port || 2333);
+    const record = buildAdifRecord(qsoData);
+    const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
+    // Start bridge if not running (or if host/port changed)
+    const hp = port || 2333;
+    if (!hamrsBridge.socket || hamrsBridge.host !== host || hamrsBridge.port !== hp) {
+      hamrsBridge.start(host, hp);
+    }
+    return hamrsBridge.sendQso(adifText);
   }
   if (type === 'hrd') {
     return sendUdpAdif(qsoData, host, port || 2333);
@@ -4113,6 +4177,9 @@ app.whenReady().then(() => {
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr) connectPskr();
+  if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
+    hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2333);
+  }
 
   // Cold start: check if app was launched via potacat:// URL
   const protocolUrl = process.argv.find(a => a.startsWith('potacat://'));
@@ -4953,6 +5020,17 @@ app.whenReady().then(() => {
       } else {
         disconnectPskr();
       }
+    }
+
+    // Start/stop HamRS bridge (WSJT-X binary heartbeats)
+    if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
+      const hp = parseInt(settings.logbookPort, 10) || 2233;
+      const hh = settings.logbookHost || '127.0.0.1';
+      if (!hamrsBridge.socket || hamrsBridge.host !== hh || hamrsBridge.port !== hp) {
+        hamrsBridge.start(hh, hp);
+      }
+    } else {
+      hamrsBridge.stop();
     }
 
     // Auto-parse ADIF and send DXCC data if enabled
@@ -5805,6 +5883,7 @@ function gracefulCleanup() {
   try { disconnectTci(); } catch {}
   try { disconnectRemote(); } catch {}
   try { disconnectKeyer(); } catch {}
+  try { hamrsBridge.stop(); } catch {}
   killRigctld();
 }
 
