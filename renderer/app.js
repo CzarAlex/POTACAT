@@ -883,7 +883,7 @@ function renderRigOptions(filteredList, selectedId) {
   if (filteredList.length === 0) {
     const opt = document.createElement('option');
     opt.value = '';
-    opt.textContent = allRigOptions.length === 0 ? 'No rigs found — is Hamlib installed?' : 'No matches';
+    opt.textContent = allRigOptions.length === 0 ? 'No rigs found — install Hamlib (Linux: sudo apt install libhamlib-utils)' : 'No matches';
     setRigModel.appendChild(opt);
   } else {
     for (const rig of filteredList) {
@@ -2057,6 +2057,7 @@ const LOGBOOK_DEFAULTS = {
   hamrs: { port: 2333, help: 'In HamRS: enable WSJT-X integration in Settings and set the UDP port. POTACAT speaks the WSJT-X binary protocol so HamRS sees it as a WSJT-X connection. The port here must match the port in HamRS. HamRS must be running to receive QSOs.' },
   n3fjp: { port: 1100, help: 'In N3FJP: Settings > Application Program Interface > check "TCP API Enabled". Set the port to 1100 (default). N3FJP must be running to receive QSOs. When using with WSJT-X, open WSJT-X first, then POTACAT, then N3FJP.' },
   hrd: { port: 2333, help: 'In HRD Logbook: Tools > Configure > QSO Forwarding. Under UDP Receive, check "Receive QSO notifications using UDP9/ADIF from other logging programs (eg. WSJT-X)". Set the receive port to 2333 and select your target database. POTACAT and WSJT-X can both send to this port simultaneously.' },
+  macloggerdx: { port: 9090, help: 'In MacLoggerDX: Preferences > UDP > check "Enable UDP Server". Set the port to 9090 (default). MacLoggerDX must be running to receive QSOs.' },
   wavelog: { apiConfig: true },
 };
 
@@ -5145,6 +5146,7 @@ document.querySelector('.spots-dropdown-panel').addEventListener('change', async
   setEnablePskr.checked = enablePskr;
   setHideWorked.checked = hideWorked;
   setHideWorkedParks.checked = hideWorkedParks;
+  quickHideWorkedParks.checked = hideWorkedParks;
   setHideOutOfBand.checked = hideOutOfBand;
   setEnableDxcc.checked = enableDxcc;
 
@@ -5185,6 +5187,7 @@ logbookBtn.addEventListener('click', () => window.api.qsoPopoutOpen());
 const settingsDropdown = document.getElementById('settings-dropdown');
 const quickLightMode = document.getElementById('quick-light-mode');
 const quickActivatorMode = document.getElementById('quick-activator-mode');
+const quickHideWorkedParks = document.getElementById('quick-hide-worked-parks');
 const openSettingsBtn = document.getElementById('open-settings-btn');
 
 settingsDropdown.querySelector('.settings-dropdown-panel').addEventListener('click', (e) => {
@@ -5202,6 +5205,7 @@ settingsBtn.addEventListener('click', (e) => {
     // Sync switches to current state
     quickLightMode.checked = document.documentElement.getAttribute('data-theme') === 'light';
     quickActivatorMode.checked = appMode === 'activator';
+    quickHideWorkedParks.checked = hideWorkedParks;
     refreshEchoCatInfo();
   }
 });
@@ -5224,6 +5228,15 @@ quickActivatorMode.addEventListener('change', async () => {
   settingsDropdown.classList.remove('open');
   closeActivatorSettingsPanel();
   await window.api.saveSettings({ appMode: mode });
+});
+
+quickHideWorkedParks.addEventListener('change', async () => {
+  hideWorkedParks = quickHideWorkedParks.checked;
+  spotsHideParks.checked = hideWorkedParks;
+  setHideWorkedParks.checked = hideWorkedParks;
+  renderTable();
+  renderMap();
+  await window.api.saveSettings({ hideWorkedParks });
 });
 
 openSettingsBtn.addEventListener('click', () => {

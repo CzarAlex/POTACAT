@@ -2061,6 +2061,58 @@ html, body {
   .log-toast { font-size: 15px; padding: 12px 24px; bottom: 160px; }
 }
 
+/* ========== PHONE LANDSCAPE ========== */
+@media (orientation: landscape) and (max-height: 500px) {
+  #status-bar { padding: 4px 12px; padding-left: calc(12px + env(safe-area-inset-left, 0px)); padding-right: calc(12px + env(safe-area-inset-right, 0px)); }
+  #freq-display { font-size: 18px; }
+  #mode-badge { font-size: 11px; padding: 1px 6px; }
+  #tab-bar .tab { padding: 5px 0; font-size: 11px; }
+  .tab-badge { font-size: 8px; min-width: 14px; height: 14px; line-height: 14px; top: 2px; right: -4px; }
+  #filter-toolbar { padding: 3px 8px; padding-left: calc(8px + env(safe-area-inset-left, 0px)); padding-right: calc(8px + env(safe-area-inset-right, 0px)); }
+  .rc-dropdown-btn { padding: 3px 8px; font-size: 11px; }
+  .rc-sort-select { height: 24px; font-size: 11px; }
+  #bottom-bar {
+    gap: 12px;
+    padding: 4px 16px;
+    padding-bottom: calc(4px + var(--safe-bottom));
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  }
+  .ptt-button { width: 52px; height: 52px; font-size: 14px; font-weight: 800; border-width: 3px; }
+  .estop-button { width: 36px; height: 36px; font-size: 8px; }
+  .audio-button { width: 36px; height: 36px; }
+  .audio-icon { font-size: 16px; }
+  .audio-label { font-size: 7px; max-width: 34px; }
+  .speaker-button { width: 36px; height: 36px; }
+  .speaker-icon { font-size: 16px; }
+  .speaker-label { font-size: 7px; }
+  #tx-banner { padding: 3px; font-size: 12px; letter-spacing: 1px; }
+  #activation-banner { padding: 4px 12px; padding-left: calc(12px + env(safe-area-inset-left, 0px)); }
+  .activation-ref { font-size: 13px; }
+  .activation-timer { font-size: 12px; }
+  .spot-card { padding: 6px 10px; gap: 6px; margin-bottom: 2px; }
+  .spot-call { font-size: 13px; min-width: 64px; }
+  .spot-freq { font-size: 12px; min-width: 58px; }
+  .spot-ref { font-size: 11px; }
+  .spot-age { font-size: 10px; }
+  .spot-mode { font-size: 10px; padding: 0 4px; }
+  .spot-dist { font-size: 10px; min-width: 40px; }
+  #log-sheet { max-height: 90vh; padding: 6px 12px calc(8px + var(--safe-bottom)); }
+  .log-sheet-title { font-size: 15px; margin-bottom: 8px; }
+  .log-field { margin-bottom: 6px; }
+  .log-field input, .log-field select { padding: 6px 10px; font-size: 14px; }
+  .log-actions { gap: 6px; margin-top: 6px; }
+  .log-btn-cancel, .log-btn-save { padding: 8px; font-size: 14px; }
+  .log-toast { bottom: 70px; }
+  #mode-picker { top: 32px; }
+  #spot-list { padding: 2px 8px; padding-left: calc(8px + env(safe-area-inset-left, 0px)); padding-right: calc(8px + env(safe-area-inset-right, 0px)); }
+  .spot-log-btn { padding: 2px 8px; font-size: 10px; }
+  #settings-overlay { padding-top: 4px; }
+  .so-section-label { margin: 8px 0 4px; font-size: 10px; }
+  .so-row { padding: 6px 0; }
+  .so-label { font-size: 13px; }
+}
+
 /* ========== TABLET LANDSCAPE ========== */
 @media (min-width: 768px) and (orientation: landscape) {
   /* Landscape iPad — wider safe areas, more horizontal room */

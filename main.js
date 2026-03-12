@@ -224,19 +224,25 @@ function findRigctld() {
   }
 
   // Check bundled path (packaged app vs dev)
+  const isWin = process.platform === 'win32';
+  const rigBin = isWin ? 'rigctld.exe' : 'rigctld';
   const bundledPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'hamlib', 'rigctld.exe')
-    : path.join(__dirname, 'assets', 'hamlib', 'rigctld.exe');
+    ? path.join(process.resourcesPath, 'hamlib', rigBin)
+    : path.join(__dirname, 'assets', 'hamlib', rigBin);
   try {
     fs.accessSync(bundledPath, fs.constants.X_OK);
     return bundledPath;
   } catch { /* fall through */ }
 
-  // Check common install directories (Windows)
-  const candidates = [
+  // Check common install directories
+  const candidates = isWin ? [
     'C:\\Program Files\\hamlib\\bin\\rigctld.exe',
     'C:\\Program Files (x86)\\hamlib\\bin\\rigctld.exe',
     'C:\\hamlib\\bin\\rigctld.exe',
+  ] : [
+    '/usr/bin/rigctld',
+    '/usr/local/bin/rigctld',
+    '/snap/bin/rigctld',
   ];
   for (const p of candidates) {
     try {
@@ -1580,19 +1586,31 @@ function sendAgStatus() {
  * @param {number} freqKhz - Frequency in kHz
  */
 function agSwitchForFreq(freqKhz) {
-  if (!agClient || !agClient.connected) return;
-  if (!settings.agBandMap || typeof settings.agBandMap !== 'object') return;
+  if (!agClient || !agClient.connected) {
+    sendCatLog('[AG] Skip switch — not connected');
+    return;
+  }
+  if (!settings.agBandMap || typeof settings.agBandMap !== 'object') {
+    sendCatLog('[AG] Skip switch — no band map configured');
+    return;
+  }
 
   const freqMhz = freqKhz / 1000;
   const band = freqToBand(freqMhz);
-  if (!band) return;
+  if (!band) {
+    sendCatLog(`[AG] Skip switch — freq ${freqKhz} kHz not in any band`);
+    return;
+  }
 
   // Don't re-send if already on this band
   if (band === agLastBand) return;
   agLastBand = band;
 
   const antenna = settings.agBandMap[band];
-  if (!antenna) return; // no mapping for this band
+  if (!antenna) {
+    sendCatLog(`[AG] No antenna mapped for ${band}`);
+    return;
+  }
 
   const radioPort = settings.agRadioPort || 1;
   sendCatLog(`[AG] Band ${band} → antenna ${antenna} (port ${radioPort === 1 ? 'A' : 'B'})`);
@@ -3125,6 +3143,9 @@ function forwardToLogbook(qsoData) {
   if (type === 'hrd') {
     return sendUdpAdif(qsoData, host, port || 2333);
   }
+  if (type === 'macloggerdx') {
+    return sendUdpAdif(qsoData, host, port || 9090);
+  }
   if (type === 'n3fjp') {
     return sendN3fjpTcp(qsoData, host, port || 1100);
   }
@@ -3139,7 +3160,7 @@ function forwardToLogbook(qsoData) {
 
 /**
  * Send a QSO via plain UDP ADIF packet.
- * Used by Log4OM 2 (port 2237) and HRD Logbook (port 2333).
+ * Used by Log4OM 2 (port 2237), HRD Logbook (port 2333), and MacLoggerDX (port 9090).
  */
 function sendUdpAdif(qsoData, host, port) {
   return new Promise((resolve, reject) => {
