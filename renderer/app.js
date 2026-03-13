@@ -2473,8 +2473,8 @@ function getFiltered() {
       if (spotAgeSecs(s.spotTime) > 900) return false;
     } else if (s.source === 'sota') {
       // SOTA spots are posted once by a human (not re-spotted like POTA);
-      // activations last 1-2 hours so use a fixed 90-minute window
-      if (spotAgeSecs(s.spotTime) > 5400) return false;
+      // activations typically last under an hour so use a fixed 60-minute window
+      if (spotAgeSecs(s.spotTime) > 3600) return false;
     } else {
       if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
     }

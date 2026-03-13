@@ -1199,7 +1199,7 @@ async function saveQsoRecord(qsoData) {
   // Auto-upload chaser QSO to SOTAdata if enabled
   if (settings.sotaUpload && qsoData.sig === 'SOTA' && qsoData.sigInfo && sotaUploader.configured) {
     try {
-      sendCatLog(`[SOTA] Uploading chase: ${qsoData.callsign} @ ${qsoData.sigInfo}`);
+      sendCatLog(`[SOTA] Uploading chase: ${qsoData.callsign} @ ${qsoData.sigInfo} RST S${qsoData.rstSent || '?'} R${qsoData.rstRcvd || '?'}`);
       const sotaResult = await sotaUploader.uploadChase(qsoData);
       if (sotaResult.success) {
         sendCatLog(`[SOTA] Chase uploaded successfully`);
@@ -3334,7 +3334,28 @@ function sendWavelogHttp(qsoData) {
 async function sendToQrzLogbook(qsoData) {
   const apiKey = settings.qrzApiKey;
   if (!apiKey) throw new Error('QRZ API key not configured');
-  const record = buildAdifRecord(qsoData);
+
+  // Enrich COMMENT with park name + location for POTA/WWFF/LLOTA QSOs
+  let enriched = qsoData;
+  const parkRef = qsoData.potaRef || qsoData.wwffRef;
+  if (parkRef) {
+    const park = getParkDb(parksMap, parkRef);
+    if (park) {
+      const parts = [
+        qsoData.sig || 'POTA',
+        parkRef,
+        park.name || '',
+        park.locationDesc || '',
+      ].filter(Boolean);
+      const parkComment = parts.join(' ');
+      const userComment = (qsoData.comment || '').trim();
+      // Combine park info with any user-typed comment
+      const fullComment = userComment ? `${parkComment} - ${userComment}` : parkComment;
+      enriched = { ...qsoData, comment: fullComment };
+    }
+  }
+
+  const record = buildAdifRecord(enriched);
   await QrzClient.uploadQso(apiKey, record, settings.myCallsign || '');
 }
 
