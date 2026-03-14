@@ -5678,7 +5678,7 @@ app.whenReady().then(() => {
     for (const raw of rawQsos) {
       try {
         const qsoData = rawQsoToQsoData(raw);
-        forwardToLogbook(qsoData);
+        await forwardToLogbook(qsoData);
         sent++;
         // Small delay between sends to avoid flooding
         if (rawQsos.length > 1) await new Promise(r => setTimeout(r, 150));

@@ -46,6 +46,9 @@
     .qso-table td:nth-child(10) { white-space: normal; word-break: break-word; max-width: 150px; }
     .qso-table tr:last-child td { border-bottom: none; }
     .qso-table td.editable { cursor: text; }
+    .qso-table tbody tr { cursor: pointer; }
+    .qso-table tbody tr.selected { background: color-mix(in srgb, var(--accent-blue) 20%, transparent); }
+    .qso-table tbody tr.selected td { color: var(--text-primary); }
     .qso-table td input {
       width: 100%; background: var(--bg-input); border: 1px solid var(--accent-blue);
       color: var(--text-primary); padding: 1px 4px; font-size: inherit;
