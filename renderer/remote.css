@@ -1847,6 +1847,7 @@ html, body {
 .ft8-row:active { background: rgba(255,255,255,0.05); }
 .ft8-row .ft8-time { color: #4fc3f7; min-width: 52px; }
 .ft8-row .ft8-db { color: #8a8aa0; min-width: 28px; text-align: right; }
+.ft8-row .ft8-dt { color: #666; min-width: 30px; text-align: right; font-size: 11px; }
 .ft8-row .ft8-df { color: #4fc3f7; min-width: 36px; text-align: right; }
 .ft8-row .ft8-msg { color: #c8c8d8; }
 .ft8-row.ft8-cq { border-left-color: var(--pota); }

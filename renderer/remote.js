@@ -2991,6 +2991,7 @@
         row.innerHTML =
           '<span class="ft8-time">' + esc(time) + '</span>' +
           '<span class="ft8-db">' + (d.db >= 0 ? '+' : '') + d.db + '</span>' +
+          '<span class="ft8-dt">' + (d.dt != null ? (d.dt >= 0 ? '+' : '') + d.dt.toFixed(1) : '') + '</span>' +
           '<span class="ft8-df">' + d.df + '</span>' +
           '<span class="ft8-msg">' + esc(text) + '</span>';
         // Click to reply
