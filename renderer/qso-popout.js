@@ -595,6 +595,24 @@ document.getElementById('qso-export').addEventListener('click', async () => {
   }
 });
 
+// --- Resend to Logbook ---
+document.getElementById('qso-resend').addEventListener('click', async () => {
+  if (!filtered.length) { toast('No QSOs to resend'); return; }
+  const count = filtered.length;
+  const label = hasActiveFilters() ? `${count} filtered QSOs` : `all ${count} QSOs`;
+  if (!confirm(`Resend ${label} to configured logbook?`)) return;
+  try {
+    const result = await window.api.resendQsosToLogbook(filtered);
+    if (result.success) {
+      toast(`Sent ${result.sent} of ${result.total} QSOs to logbook`);
+    } else {
+      toast('Resend failed: ' + (result.error || 'unknown error'));
+    }
+  } catch (err) {
+    toast('Resend failed: ' + err.message);
+  }
+});
+
 // --- Titlebar ---
 (function setupTitlebar() {
   if (window.api.platform === 'darwin') {

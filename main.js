@@ -1320,6 +1320,14 @@ function connectWsjtx() {
           allQsoData.push(parkQso);
           await saveQsoRecord(parkQso);
         }
+        // Cross-program references (WWFF, LLOTA for same park)
+        const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+        for (const xr of crossRefs) {
+          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '', skipLogbookForward: true };
+          if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
+          allQsoData.push(xrQso);
+          await saveQsoRecord(xrQso);
+        }
         // Notify renderer so activator view gets the contact
         if (win && !win.isDestroyed()) {
           const freqKhz = Math.round(freqMHz * 1000);
@@ -2169,6 +2177,13 @@ function connectRemote() {
           const r = await saveQsoRecord(qsoData);
           if (r) Object.assign(result, r);
         }
+        // Cross-program references (WWFF, LLOTA for same park)
+        const crossRefs1 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+        for (const xr of crossRefs1) {
+          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
+          if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
+          await saveQsoRecord(xrQso);
+        }
       } else if (settings.appMode === 'activator') {
         // Desktop is in activator mode but phone didn't send mySig — use desktop park refs
         const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
@@ -2178,6 +2193,13 @@ function connectRemote() {
             if (i > 0) parkQso.skipLogbookForward = true;
             const r = await saveQsoRecord(parkQso);
             if (r) Object.assign(result, r);
+          }
+          // Cross-program references (WWFF, LLOTA for same park)
+          const crossRefs2 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+          for (const xr of crossRefs2) {
+            const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
+            if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
+            await saveQsoRecord(xrQso);
           }
         } else {
           const r = await saveQsoRecord(qsoData);
@@ -2538,7 +2560,11 @@ async function processSotaSpots(raw) {
   // Batch-fetch summit coordinates (cached across refreshes)
   await fetchSummitCoordsBatch(raw);
 
-  const all = raw.map((s) => {
+  const all = raw.filter((s) => {
+    // Skip spots with no frequency (pre-announced activations with no QRG)
+    const f = parseFloat(s.frequency);
+    return !isNaN(f) && f > 0;
+  }).map((s) => {
     const freqMHz = parseFloat(s.frequency);
     const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz → convert to kHz
     const assoc = s.associationCode || '';
@@ -3063,13 +3089,13 @@ const hamrsBridge = {
   socket: null,
   heartbeatTimer: null,
   host: '127.0.0.1',
-  port: 2333,
+  port: 2237,
   id: 'POTACAT',
 
   start(host, port) {
     this.stop();
     this.host = host || '127.0.0.1';
-    this.port = port || 2333;
+    this.port = port || 2237;
     const dgram = require('dgram');
     this.socket = dgram.createSocket('udp4');
     this.socket.on('error', (err) => {
@@ -3107,10 +3133,23 @@ const hamrsBridge = {
       const freqHz = Math.round((parseFloat(qsoData.frequency) || 0) * 1000);
       sendCatLog(`[HamRS] Sending QSO: ${qsoData.callsign} ${freqHz}Hz ${qsoData.mode} → ${this.host}:${this.port}`);
 
+      // Build proper Date objects from qsoData date/time fields
+      let dateTimeOff;
+      if (qsoData.qsoDate) {
+        const d = qsoData.qsoDate; // YYYYMMDD
+        const t = qsoData.timeOn || '0000'; // HHMM or HHMMSS
+        dateTimeOff = new Date(Date.UTC(
+          parseInt(d.slice(0, 4), 10), parseInt(d.slice(4, 6), 10) - 1, parseInt(d.slice(6, 8), 10),
+          parseInt(t.slice(0, 2), 10), parseInt(t.slice(2, 4), 10), t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0
+        ));
+      }
+
       // Send QSO_LOGGED (type 5) — the primary message most apps listen for
       const qsoMsg = encodeQsoLogged(this.id, {
+        dateTimeOff,
+        dateTimeOn: dateTimeOff,
         dxCall: qsoData.callsign || '',
-        dxGrid: qsoData.grid || '',
+        dxGrid: qsoData.gridsquare || '',
         txFrequency: freqHz,
         mode: qsoData.mode || '',
         reportSent: qsoData.rstSent || '59',
@@ -3143,6 +3182,44 @@ const hamrsBridge = {
 };
 
 // --- Logbook forwarding ---
+
+/**
+ * Convert raw ADIF fields (uppercase keys from parseAllRawQsos) to the
+ * qsoData format that buildAdifRecord() / forwardToLogbook() expect.
+ */
+function rawQsoToQsoData(raw) {
+  const freqMhz = parseFloat(raw.FREQ || '0');
+  return {
+    callsign: raw.CALL || '',
+    frequency: (freqMhz * 1000).toFixed(1), // MHz → kHz
+    mode: raw.MODE || '',
+    qsoDate: raw.QSO_DATE || '',
+    timeOn: raw.TIME_ON || '',
+    rstSent: raw.RST_SENT || '',
+    rstRcvd: raw.RST_RCVD || '',
+    txPower: raw.TX_PWR || '',
+    band: raw.BAND || '',
+    sig: raw.SIG || '',
+    sigInfo: raw.SIG_INFO || '',
+    potaRef: raw.POTA_REF || '',
+    sotaRef: raw.SOTA_REF || '',
+    wwffRef: raw.WWFF_REF || '',
+    operator: raw.OPERATOR || '',
+    name: raw.NAME || '',
+    state: raw.STATE || '',
+    county: raw.CNTY || '',
+    gridsquare: raw.GRIDSQUARE || '',
+    country: raw.COUNTRY || '',
+    comment: raw.COMMENT || '',
+    mySig: raw.MY_SIG || '',
+    mySigInfo: raw.MY_SIG_INFO || '',
+    myPotaRef: raw.MY_POTA_REF || '',
+    mySotaRef: raw.MY_SOTA_REF || '',
+    myGridsquare: raw.MY_GRIDSQUARE || '',
+    stationCallsign: raw.STATION_CALLSIGN || '',
+  };
+}
+
 function forwardToLogbook(qsoData) {
   const type = settings.logbookType;
   const host = settings.logbookHost || '127.0.0.1';
@@ -3155,7 +3232,7 @@ function forwardToLogbook(qsoData) {
     const record = buildAdifRecord(qsoData);
     const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
     // Start bridge if not running (or if host/port changed)
-    const hp = port || 2333;
+    const hp = port || 2237;
     if (!hamrsBridge.socket || hamrsBridge.host !== host || hamrsBridge.port !== hp) {
       hamrsBridge.start(host, hp);
     }
@@ -4451,7 +4528,7 @@ app.whenReady().then(() => {
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr) connectPskr();
   if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
-    hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2333);
+    hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
   }
 
   // Cold start: check if app was launched via potacat:// URL
@@ -5322,7 +5399,7 @@ app.whenReady().then(() => {
 
     // Start/stop HamRS bridge (WSJT-X binary heartbeats)
     if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
-      const hp = parseInt(settings.logbookPort, 10) || 2233;
+      const hp = parseInt(settings.logbookPort, 10) || 2237;
       const hh = settings.logbookHost || '127.0.0.1';
       if (!hamrsBridge.socket || hamrsBridge.host !== hh || hamrsBridge.port !== hp) {
         hamrsBridge.start(hh, hp);
@@ -5546,6 +5623,23 @@ app.whenReady().then(() => {
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  ipcMain.handle('resend-qsos-to-logbook', async (_e, rawQsos) => {
+    if (!settings.logbookType) return { success: false, error: 'No logbook configured' };
+    let sent = 0;
+    for (const raw of rawQsos) {
+      try {
+        const qsoData = rawQsoToQsoData(raw);
+        forwardToLogbook(qsoData);
+        sent++;
+        // Small delay between sends to avoid flooding
+        if (rawQsos.length > 1) await new Promise(r => setTimeout(r, 150));
+      } catch (err) {
+        console.error('Resend QSO failed:', err.message);
+      }
+    }
+    return { success: true, sent, total: rawQsos.length };
   });
 
   ipcMain.handle('test-serial-cat', async (_e, config) => {

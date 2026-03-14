@@ -225,6 +225,13 @@
       <span id="activator-park-name" class="activator-park-name"></span>
       <input type="text" id="activator-grid" class="activator-grid" placeholder="Grid" maxlength="6" spellcheck="false" autocomplete="off" title="Park grid square (editable)">
       <span id="activator-park-extra" class="activator-park-extra hidden" title="Additional parks"></span>
+      <div id="activator-crossref-wrap" class="activator-crossref-wrap hidden">
+        <button id="activator-crossref-toggle" class="activator-crossref-toggle" title="Cross-program references (WWFF, LLOTA)">X-Ref</button>
+        <div id="activator-crossref-popover" class="activator-crossref-popover hidden">
+          <div class="crossref-row"><label class="crossref-label">WWFF</label><input type="text" id="activator-crossref-wwff" class="crossref-input" placeholder="KFF-1234" maxlength="20" spellcheck="false" autocomplete="off"></div>
+          <div class="crossref-row"><label class="crossref-label">LLOTA</label><input type="text" id="activator-crossref-llota" class="crossref-input" placeholder="US-0001" maxlength="20" spellcheck="false" autocomplete="off"></div>
+        </div>
+      </div>
       <div class="activator-freq-group">
         <input type="text" id="activator-freq" placeholder="14.074" maxlength="10" spellcheck="false" autocomplete="off" title="Frequency in MHz — type and press Enter to tune radio">
         <span id="activator-band-label" class="activator-band-label">--</span>
@@ -902,6 +909,7 @@
       <legend>Spot Filters</legend>
       <label>Max Spot Age (minutes):
         <input type="number" id="set-max-age" min="1" max="120" value="5">
+        <span class="help-text">POTA, LLOTA, WWFF, DX</span>
       </label>
       <label>SOTA Max Spot Age (minutes):
         <input type="number" id="set-sota-max-age" min="5" max="120" value="30">
@@ -1368,7 +1376,7 @@
       <button id="settings-cancel">Cancel</button>
     </div>
     <div class="settings-footer">
-      <div class="settings-version">v1.0.8 &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
+      <div class="settings-version">v1.0.9 &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
       <div class="settings-coffee"><a href="#" id="coffee-link">Buy Me a Coffee</a></div>
       <div class="settings-links">
         <a href="#" id="discord-link">Discord</a>

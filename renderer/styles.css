@@ -3469,6 +3469,52 @@ dialog input, dialog select {
   background: #3db88a;
 }
 
+/* Cross-program references (X-Ref) */
+.activator-crossref-wrap { position: relative; display: inline-block; }
+.activator-crossref-wrap.hidden { display: none; }
+.activator-crossref-toggle {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-weight: 600;
+}
+.activator-crossref-toggle:hover { border-color: var(--accent-green); color: var(--text-primary); }
+.activator-crossref-toggle.has-refs { color: var(--accent-green); border-color: var(--accent-green); }
+.activator-crossref-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-shadow: 0 4px 12px var(--shadow-heavy);
+  white-space: nowrap;
+}
+.activator-crossref-popover.hidden { display: none; }
+.crossref-row { display: flex; align-items: center; gap: 6px; }
+.crossref-label { font-size: 11px; color: var(--text-secondary); width: 38px; text-align: right; font-weight: 600; }
+.crossref-input {
+  width: 110px;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 3px 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+.crossref-input:focus { border-color: var(--accent-green); outline: none; }
+
 /* Hunter park input in quick-log bar */
 .activator-hunter-park-wrap {
   position: relative;

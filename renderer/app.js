@@ -73,6 +73,7 @@ let qrzFullName = false; // show first+last or just first
 // --- Activator Mode State ---
 let appMode = 'hunter'; // 'hunter' or 'activator'
 let activatorParkRefs = [];   // [{ref:'K-1234', name:'Cedar Falls SP'}, ...]  max 3
+let activatorCrossRefs = [];  // [{program:'WWFF', ref:'KFF-1234'}, {program:'LLOTA', ref:'US-0001'}]
 let activatorParkGrid = '';   // Maidenhead grid for active park (auto from lat/lon, user-editable)
 let hunterParkRefs = [];      // [{ref:'K-5678', name:'Shenandoah NF'}]  max 3, resets per QSO
 let activatorContacts = []; // in-memory QSO list for current activation session
@@ -751,6 +752,13 @@ async function loadPrefs() {
       activatorParkRefInput.value = primaryParkRef();
       activatorParkNameEl.textContent = primaryParkName();
       updateParkExtraBadge();
+      // Restore cross-program references
+      if (settings.activatorCrossRefs && Array.isArray(settings.activatorCrossRefs)) {
+        activatorCrossRefs = settings.activatorCrossRefs;
+        if (crossRefWwff) for (const xr of activatorCrossRefs) { if (xr.program === 'WWFF') crossRefWwff.value = xr.ref; }
+        if (crossRefLlota) for (const xr of activatorCrossRefs) { if (xr.program === 'LLOTA') crossRefLlota.value = xr.ref; }
+        updateCrossRefToggle();
+      }
       // Resolve names and grid if missing
       for (const p of activatorParkRefs) {
         if (!p.name) {
@@ -2471,7 +2479,7 @@ const LOGBOOK_DEFAULTS = {
     help: 'In Log4OM 2: Settings > Program Configuration > Software Integration > UDP Inbound tab. Click the green "+" button to add a new entry. Set Type to "ADIF-MESSAGE" and Port to "2237". Click "Save and apply". Leave Host at 127.0.0.1 in POTACAT. Log4OM must be running to receive QSOs. Only live-logged QSOs are forwarded — importing logs into POTACAT will not create duplicates.',
   },
   dxkeeper: { port: 52001, help: 'In DXKeeper: Configuration > Defaults tab > Network Service panel. The default base port is 52000 (DXKeeper listens on base + 1 = 52001). DXKeeper must be running to receive QSOs. QSOs will be logged with missing fields auto-deduced from callbook/entity databases.' },
-  hamrs: { port: 2333, help: 'In HamRS: enable WSJT-X integration in Settings and set the UDP port. POTACAT speaks the WSJT-X binary protocol so HamRS sees it as a WSJT-X connection. The port here must match the port in HamRS. HamRS must be running to receive QSOs.' },
+  hamrs: { port: 2237, help: 'In HamRS: enable WSJT-X integration in Settings and set the UDP port to 2237 (default). POTACAT speaks the WSJT-X binary protocol so HamRS sees it as a WSJT-X connection. The port here must match the port in HamRS. HamRS must be running to receive QSOs.' },
   n3fjp: { port: 1100, help: 'In N3FJP: Settings > Application Program Interface > check "TCP API Enabled". Set the port to 1100 (default). N3FJP must be running to receive QSOs. When using with WSJT-X, open WSJT-X first, then POTACAT, then N3FJP.' },
   hrd: { port: 2333, help: 'In HRD Logbook: Tools > Configure > QSO Forwarding. Under UDP Receive, check "Receive QSO notifications using UDP9/ADIF from other logging programs (eg. WSJT-X)". Set the receive port to 2333 and select your target database. POTACAT and WSJT-X can both send to this port simultaneously.' },
   macloggerdx: { port: 9090, help: 'In MacLoggerDX: Preferences > UDP > check "Enable UDP Server". Set the port to 9090 (default). MacLoggerDX must be running to receive QSOs.' },
@@ -9828,6 +9836,9 @@ if (activatorParkRefInput) {
       activatorStartBtn.disabled = true;
       activatorParkNameEl.textContent = '';
       activatorParkRefs = [];
+      activatorCrossRefs = [];
+      if (crossRefWwff) crossRefWwff.value = '';
+      if (crossRefLlota) crossRefLlota.value = '';
       updateParkExtraBadge();
       return;
     }
@@ -10041,6 +10052,7 @@ function updateParkExtraBadge() {
     badge.textContent = '';
     badge.classList.add('hidden');
   }
+  updateCrossRefToggle();
 }
 
 /** Update hunter park input display and extra badge */
@@ -10061,6 +10073,46 @@ function updateHunterParkDisplay() {
     badge.classList.add('hidden');
   }
 }
+
+// --- Cross-Program References ---
+const crossRefWrap = document.getElementById('activator-crossref-wrap');
+const crossRefToggle = document.getElementById('activator-crossref-toggle');
+const crossRefPopover = document.getElementById('activator-crossref-popover');
+const crossRefWwff = document.getElementById('activator-crossref-wwff');
+const crossRefLlota = document.getElementById('activator-crossref-llota');
+
+function rebuildCrossRefs() {
+  activatorCrossRefs = [];
+  const wwffVal = crossRefWwff ? crossRefWwff.value.trim().toUpperCase() : '';
+  const llotaVal = crossRefLlota ? crossRefLlota.value.trim().toUpperCase() : '';
+  if (wwffVal) activatorCrossRefs.push({ program: 'WWFF', ref: wwffVal });
+  if (llotaVal) activatorCrossRefs.push({ program: 'LLOTA', ref: llotaVal });
+  window.api.saveSettings({ activatorCrossRefs });
+  updateCrossRefToggle();
+}
+
+function updateCrossRefToggle() {
+  if (!crossRefToggle || !crossRefWrap) return;
+  const hasRefs = activatorCrossRefs.length > 0;
+  crossRefToggle.classList.toggle('has-refs', hasRefs);
+  crossRefToggle.textContent = hasRefs ? `X-Ref (${activatorCrossRefs.length})` : 'X-Ref';
+  // Show the wrap when a park ref is entered
+  crossRefWrap.classList.toggle('hidden', !primaryParkRef());
+}
+
+if (crossRefToggle) {
+  crossRefToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    crossRefPopover.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    if (!crossRefPopover.contains(e.target) && e.target !== crossRefToggle) {
+      crossRefPopover.classList.add('hidden');
+    }
+  });
+}
+if (crossRefWwff) crossRefWwff.addEventListener('blur', rebuildCrossRefs);
+if (crossRefLlota) crossRefLlota.addEventListener('blur', rebuildCrossRefs);
 
 // --- Quick Log ---
 async function activatorLogContact() {
@@ -10123,6 +10175,15 @@ async function activatorLogContact() {
         allQsoData.push(qsoData);
       }
     }
+    // Cross-program records: WWFF/LLOTA refs for the same physical park
+    for (const xr of activatorCrossRefs) {
+      for (const theirPark of theirParks) {
+        const qsoData = { ...baseFields, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref };
+        if (xr.program === 'WWFF') qsoData.myWwffRef = xr.ref;
+        if (theirPark) { qsoData.sig = 'POTA'; qsoData.sigInfo = theirPark.ref; }
+        allQsoData.push(qsoData);
+      }
+    }
 
     // Save all cross-product records via existing pipeline
     // Only forward the first record to external logbook — ACLog etc. only
@@ -10132,6 +10193,29 @@ async function activatorLogContact() {
         const qsoData = allQsoData[qi];
         if (qi > 0) qsoData.skipLogbookForward = true;
         await window.api.saveQso(qsoData);
+      }
+      // Fire cross-program self-spots (WWFF/LLOTA) via quick-respot
+      for (const xr of activatorCrossRefs) {
+        if (xr.program === 'WWFF' && xr.ref) {
+          window.api.quickRespot({
+            callsign: myCallsign,
+            frequency: freqKhz ? String(freqKhz) : '',
+            mode,
+            wwffRespot: true,
+            wwffReference: xr.ref,
+            comment: '',
+          }).catch(err => console.warn('[Activator] WWFF self-spot failed:', err));
+        }
+        if (xr.program === 'LLOTA' && xr.ref) {
+          window.api.quickRespot({
+            callsign: myCallsign,
+            frequency: freqKhz ? String(freqKhz) : '',
+            mode,
+            llotaRespot: true,
+            llotaReference: xr.ref,
+            comment: '',
+          }).catch(err => console.warn('[Activator] LLOTA self-spot failed:', err));
+        }
       }
     } catch (err) {
       console.error('[Activator] Failed to save QSO:', err);
@@ -10147,7 +10231,7 @@ async function activatorLogContact() {
       rstSent,
       rstRcvd,
       name: '',
-      myParks: myParks.map(p => p.ref),
+      myParks: [...myParks.map(p => p.ref), ...activatorCrossRefs.map(xr => xr.ref)],
       theirParks: hunterParkRefs.map(p => p.ref),
       qsoData: allQsoData[0], // backward compat
       qsoDataList: allQsoData, // all cross-product records for export
@@ -10249,8 +10333,8 @@ if (activatorExportBtn) {
     // Flatten all cross-product records for export
     const qsos = activatorContacts.flatMap(c => c.qsoDataList || [c.qsoData]);
 
-    // Multi-park: offer per-park or combined export
-    if (activatorParkRefs.length > 1) {
+    // Multi-park or cross-program: offer per-park or combined export
+    if (activatorParkRefs.length > 1 || activatorCrossRefs.length > 0) {
       const dlg = document.getElementById('export-choice-dlg');
       dlg.showModal();
       const chosen = await new Promise(resolve => {
