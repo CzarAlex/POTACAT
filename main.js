@@ -1065,6 +1065,25 @@ async function saveQsoRecord(qsoData) {
   if (settings.myCallsign && !qsoData.operator) {
     qsoData.operator = settings.myCallsign.toUpperCase();
   }
+
+  // Enrich COMMENT with park name + location for POTA/WWFF/LLOTA QSOs
+  const parkRef = qsoData.potaRef || qsoData.wwffRef || (qsoData.sig && qsoData.sigInfo ? qsoData.sigInfo : '');
+  if (parkRef) {
+    const park = getParkDb(parksMap, parkRef);
+    if (park && park.name) {
+      const parts = [
+        qsoData.sig || 'POTA',
+        parkRef,
+        park.locationDesc || '',
+        park.name || '',
+      ].filter(Boolean);
+      const parkTag = `[${parts.join(' ')}]`;
+      // Strip the auto-appended [SIG REF] tag from the base comment to avoid duplication
+      const userComment = (qsoData.comment || '').replace(/\s*\[.+?\]\s*$/, '').trim();
+      qsoData.comment = userComment ? `${userComment} ${parkTag}` : parkTag;
+    }
+  }
+
   const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
   appendQso(logPath, qsoData);
 
@@ -1441,6 +1460,7 @@ function needsSmartSdr() {
   // or CW XIT offset is configured (XIT is applied via SmartSDR slice commands)
   if (settings.smartSdrSpots) return true;
   if (settings.enableCwKeyer) return true;
+  if (settings.enableRemote && settings.remoteCwEnabled) return true;
   if (settings.enableWsjtx && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.enableRemote && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.cwXit && settings.catTarget && settings.catTarget.type === 'tcp') return true;
@@ -1462,7 +1482,7 @@ function connectSmartSdr() {
   }
   smartSdr.setPersistentId(settings.smartSdrClientId);
   // Tell SmartSDR whether CW keyer needs GUI auth
-  smartSdr.setNeedsCw(!!settings.enableCwKeyer);
+  smartSdr.setNeedsCw(!!(settings.enableCwKeyer || (settings.enableRemote && settings.remoteCwEnabled)));
   // Bind to GUI client for ECHOCAT rig controls (ATU, etc.)
   smartSdr.setNeedsBind(!!settings.enableRemote);
   // Log CW auth results
@@ -1548,6 +1568,7 @@ function connectAntennaGenius() {
   if (!settings.enableAntennaGenius || !settings.agHost) return;
   agClient = new AntennaGeniusClient();
   agLastBand = null;
+  sendCatLog(`[AG] Connecting to Antenna Genius at ${settings.agHost}:9007`);
   agClient.on('connected', () => {
     sendCatLog('[AG] Connected to Antenna Genius');
     agClient.subscribePortStatus();
@@ -1568,10 +1589,10 @@ function connectAntennaGenius() {
     }
   });
   agClient.on('error', (err) => {
-    // Suppress ECONNREFUSED noise during reconnect
-    if (err.code !== 'ECONNREFUSED') {
-      console.error('AG:', err.message);
-    }
+    sendCatLog(`[AG] Error: ${err.message}`);
+  });
+  agClient.on('reconnecting', () => {
+    sendCatLog(`[AG] Reconnecting to ${settings.agHost}:9007...`);
   });
   agClient.connect(settings.agHost, 9007);
 }
@@ -1709,8 +1730,36 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
     }
+    // CW safety: ensure PTT released on disconnect (keyer.stop() is handled in RemoteServer)
+    if (smartSdr && smartSdr.connected) {
+      smartSdr.cwPttRelease();
+    }
     destroyRemoteAudioWindow();
   });
+
+  // CW keyer output: route IambicKeyer key events to SmartSDR
+  remoteServer.setCwKeyerOutput(({ down }) => {
+    if (smartSdr && smartSdr.connected) {
+      if (down) {
+        smartSdr.cwPttOn(); // activate CW PTT (with holdoff auto-release)
+      }
+      smartSdr.cwKey(down);
+    }
+  });
+
+  // CW config changes from phone (WPM)
+  remoteServer.on('cw-config', ({ wpm }) => {
+    if (smartSdr && smartSdr.connected) {
+      smartSdr.setCwSpeed(wpm);
+    }
+  });
+
+  // Enable remote CW if setting is on and SmartSDR is available
+  if (settings.remoteCwEnabled) {
+    remoteServer.setCwEnabled(true);
+    // Ensure SmartSDR knows we need CW auth
+    if (smartSdr) smartSdr.setNeedsCw(true);
+  }
 
   remoteServer.on('set-sources', (sources) => {
     if (!sources) return;
@@ -3427,28 +3476,8 @@ async function sendToQrzLogbook(qsoData) {
   const apiKey = settings.qrzApiKey;
   if (!apiKey) throw new Error('QRZ API key not configured');
 
-  // Enrich COMMENT with park name + location for POTA/WWFF/LLOTA QSOs
-  let enriched = qsoData;
-  const parkRef = qsoData.potaRef || qsoData.wwffRef;
-  if (parkRef) {
-    const park = getParkDb(parksMap, parkRef);
-    if (park) {
-      const parts = [
-        qsoData.sig || 'POTA',
-        parkRef,
-        park.name || '',
-        park.locationDesc || '',
-      ].filter(Boolean);
-      const parkComment = parts.join(' ');
-      // Strip the auto-appended [SIG REF] tag from the base comment to avoid duplication
-      const userComment = (qsoData.comment || '').replace(/\s*\[.+?\]\s*$/, '').trim();
-      // Combine park info with any user-typed comment
-      const fullComment = userComment ? `${parkComment} - ${userComment}` : parkComment;
-      enriched = { ...qsoData, comment: fullComment };
-    }
-  }
-
-  const record = buildAdifRecord(enriched);
+  // Comment already enriched with park name in saveQsoRecord()
+  const record = buildAdifRecord(qsoData);
   await QrzClient.uploadQso(apiKey, record, settings.myCallsign || '');
 }
 
@@ -5307,7 +5336,8 @@ app.whenReady().then(() => {
       (has('remoteToken') && newSettings.remoteToken !== settings.remoteToken) ||
       (has('remoteRequireToken') && newSettings.remoteRequireToken !== settings.remoteRequireToken) ||
       (has('clubMode') && newSettings.clubMode !== settings.clubMode) ||
-      (has('clubCsvPath') && newSettings.clubCsvPath !== settings.clubCsvPath);
+      (has('clubCsvPath') && newSettings.clubCsvPath !== settings.clubCsvPath) ||
+      (has('remoteCwEnabled') && newSettings.remoteCwEnabled !== settings.remoteCwEnabled);
 
     const iconChanged = has('lightIcon') && newSettings.lightIcon !== settings.lightIcon;
 
@@ -5352,7 +5382,7 @@ app.whenReady().then(() => {
     }
 
     // Reconnect SmartSDR if settings changed (also needed for WSJT-X+Flex and CW keyer)
-    if (smartSdrChanged || wsjtxChanged || cwKeyerChanged) {
+    if (smartSdrChanged || wsjtxChanged || cwKeyerChanged || remoteChanged) {
       connectSmartSdr(); // needsSmartSdr() decides whether to actually connect
     }
 
