@@ -229,10 +229,20 @@
     var el = arc.getElement();
     if (!el) return;
     el.style.stroke = color;
-    var sorted = [fromCall, toCall].sort();
-    var forward = sorted[0] === fromCall;
+    // Arc geometry is always drawn from fromStn to toStn.
+    // But we reuse the same polyline (keyed by sorted callsigns), so the
+    // underlying point order might not match the current from→to direction.
+    // Compare the first point of the polyline with fromStn's position to
+    // determine if the polyline direction matches the intended direction.
+    var fromStn = stations[fromCall];
+    var pts = arc.getLatLngs();
+    var polylineMatchesFrom = false;
+    if (fromStn && pts && pts.length > 0) {
+      var p0 = pts[0];
+      polylineMatchesFrom = (Math.abs(p0.lat - fromStn.lat) < 1 && Math.abs(p0.lng - fromStn.lon) < 1);
+    }
     el.classList.remove('jtcat-arc-forward', 'jtcat-arc-reverse');
-    el.classList.add(forward ? 'jtcat-arc-forward' : 'jtcat-arc-reverse');
+    el.classList.add(polylineMatchesFrom ? 'jtcat-arc-forward' : 'jtcat-arc-reverse');
   }
 
   function plotDecode(d) {
@@ -509,10 +519,18 @@
       return;
     } else {
       qsoState = data;
-      // Draw arc to QSO partner as soon as the QSO is active
+      // Draw arc to QSO partner — direction based on current phase
       if (qsoState.call && myCallsign) {
         if (qsoState.grid) registerStation(qsoState.call, qsoState.grid);
-        drawQsoArc(myCallsign, qsoState.call);
+        // RX phases mean we just heard them → arc goes them→us
+        // TX phases mean we're about to send → arc goes us→them
+        var rxPhases = { 'cq-reply': 1, 'cq-r+rpt': 1, 'rpt-rx': 1, 'rr73-rx': 1 };
+        var theyAreSource = rxPhases[qsoState.phase];
+        if (theyAreSource) {
+          drawQsoArc(qsoState.call, myCallsign);
+        } else {
+          drawQsoArc(myCallsign, qsoState.call);
+        }
       }
     }
     renderQsoTracker();
