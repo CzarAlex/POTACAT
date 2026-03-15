@@ -83,6 +83,40 @@ html, body {
   border-color: var(--accent);
 }
 
+/* Club login inputs */
+#club-callsign, #club-password {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 18px;
+  background: var(--bg-card);
+  border: 2px solid #333;
+  border-radius: 12px;
+  color: var(--text);
+  outline: none;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+#club-callsign {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+#club-callsign:focus, #club-password:focus {
+  border-color: var(--accent);
+}
+
+/* Member badge in status bar */
+.member-badge {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  padding: 2px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
 #connect-btn {
   display: block;
   width: 100%;
@@ -247,8 +281,165 @@ html, body {
 }
 
 #status-bar.editing #freq-display,
-#status-bar.editing #mode-badge { display: none !important; }
+#status-bar.editing #mode-badge,
+#status-bar.editing .freq-step-btns { display: none !important; }
 #status-bar.editing #freq-edit { display: flex !important; }
+
+/* --- Frequency Step Buttons (in status bar) --- */
+.freq-step-btns {
+  display: flex;
+  gap: 4px;
+  margin-left: 4px;
+}
+.freq-step-btn {
+  background: var(--bg);
+  border: 1px solid #444;
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 2px 6px;
+  cursor: pointer;
+  line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+}
+.freq-step-btn:active { background: var(--accent); color: #fff; }
+
+/* --- Dial Pad Overlay --- */
+#dial-pad-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 199;
+}
+#dial-pad {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 200;
+  background: var(--bg-card);
+  border: 1px solid #444;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  padding: 16px;
+  width: 280px;
+  max-width: 90vw;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.dp-freq-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 0 12px;
+  border-bottom: 1px solid #333;
+  margin-bottom: 12px;
+}
+#dp-freq {
+  font-size: 28px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text);
+  min-height: 34px;
+}
+#dp-freq.empty { color: var(--text-dim); }
+.dp-unit {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.dp-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.dp-btn {
+  padding: 14px 0;
+  font-size: 22px;
+  font-weight: 600;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #444;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.1s;
+}
+.dp-btn:active { background: var(--accent); color: #fff; }
+.dp-del { font-size: 20px; color: var(--text-dim); }
+.dp-dot { font-size: 26px; font-weight: 800; }
+
+.dp-step-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.dp-step-btn {
+  width: 56px;
+  padding: 10px 0;
+  font-size: 16px;
+  font-weight: 700;
+  background: var(--bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.dp-step-btn:active { background: var(--accent); color: #fff; }
+.dp-step-size {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #444;
+  border-radius: 8px;
+  cursor: pointer;
+  min-width: 72px;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.dp-step-size:active { background: #333; }
+
+.dp-actions {
+  display: flex;
+  gap: 8px;
+}
+.dp-cancel, .dp-clear, .dp-go {
+  flex: 1;
+  padding: 12px 0;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.dp-cancel {
+  background: #333;
+  color: var(--text-dim);
+}
+.dp-clear {
+  background: #333;
+  color: var(--text);
+}
+.dp-go {
+  background: var(--accent);
+  color: #fff;
+}
+.dp-cancel:active { background: #444; }
+.dp-clear:active { background: #444; }
+.dp-go:active { background: #c73a50; }
 
 /* --- Rig Controls Toggle (gear icon in status bar) --- */
 .rig-ctrl-toggle {
@@ -726,6 +917,242 @@ html, body {
 
 .speaker-icon { font-size: 20px; }
 .speaker-label { font-size: 9px; font-weight: 600; }
+
+/* --- CW Keyer Panel --- */
+#cw-panel {
+  background: var(--bg-header);
+  border-top: 1px solid #333;
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+.cw-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cw-indicator {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #444;
+  border: 2px solid #555;
+  flex-shrink: 0;
+  transition: background 0.05s, box-shadow 0.05s;
+}
+
+.cw-indicator.active {
+  background: #ff2244;
+  box-shadow: 0 0 12px rgba(255, 34, 68, 0.6);
+  border-color: #ff4466;
+}
+
+.cw-wpm-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cw-wpm-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #333;
+  color: var(--text);
+  border: 1px solid #555;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cw-wpm-btn:active { background: #555; }
+
+.cw-wpm-label {
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 56px;
+  text-align: center;
+  color: var(--text);
+}
+
+.cw-mode-wrap {
+  display: flex;
+  gap: 2px;
+}
+
+.cw-mode-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: #333;
+  color: var(--text-dim);
+  border: 1px solid #555;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cw-mode-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.cw-mode-btn:active { opacity: 0.8; }
+
+.cw-tone-wrap, .cw-vol-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cw-tone-label, .cw-vol-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.cw-slider {
+  width: 60px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #444;
+  border-radius: 2px;
+  outline: none;
+}
+
+.cw-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  cursor: pointer;
+}
+
+.cw-tone-val {
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 24px;
+}
+
+.cw-macro-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.cw-macro-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: #333;
+  color: var(--text);
+  border: 1px solid #555;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  min-width: 40px;
+  text-align: center;
+}
+
+.cw-macro-btn:active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.cw-macro-btn.sending {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.cw-text-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.cw-text-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  text-transform: uppercase;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #555;
+  border-radius: 6px;
+  outline: none;
+}
+
+.cw-text-input:focus { border-color: var(--accent); }
+
+.cw-text-send {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cw-text-send:active { opacity: 0.8; }
+
+/* CW Macro editor in settings */
+.so-cw-macros { padding: 0 0 4px 0; }
+
+.so-macro-edit {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0 !important;
+}
+
+.so-macro-label {
+  width: 60px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #555;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.so-macro-text {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  text-transform: uppercase;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid #555;
+  border-radius: 6px;
+}
+
+.so-macro-label:focus, .so-macro-text:focus { border-color: var(--accent); outline: none; }
+
+[data-theme="light"] #cw-panel { border-top-color: #ddd; }
+[data-theme="light"] .cw-indicator { background: #ccc; border-color: #bbb; }
+[data-theme="light"] .cw-indicator.active { background: #ff2244; border-color: #ff4466; }
+[data-theme="light"] .cw-wpm-btn { background: #ddd; border-color: #bbb; color: #333; }
+[data-theme="light"] .cw-mode-btn { background: #ddd; border-color: #bbb; color: #666; }
+[data-theme="light"] .cw-mode-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+[data-theme="light"] .cw-slider { background: #ccc; }
+[data-theme="light"] .cw-macro-btn { background: #ddd; border-color: #bbb; color: #333; }
+[data-theme="light"] .cw-text-input { background: #f5f5f5; border-color: #bbb; color: #333; }
+[data-theme="light"] .so-macro-label, [data-theme="light"] .so-macro-text { background: #f5f5f5; border-color: #bbb; color: #333; }
 
 /* --- Spot Card Log Button --- */
 .spot-log-btn {
@@ -1974,6 +2401,8 @@ html, body {
 
 /* Token input */
 [data-theme="light"] #token-input { border-color: #ccc; }
+[data-theme="light"] #club-callsign,
+[data-theme="light"] #club-password { border-color: #ccc; }
 
 /* Mode picker */
 [data-theme="light"] #mode-picker { border-color: #ccc; box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
@@ -1987,6 +2416,18 @@ html, body {
 
 /* Freq edit */
 [data-theme="light"] #freq-input { border-color: var(--accent); }
+
+/* Dial pad */
+[data-theme="light"] #dial-pad { border-color: #ccc; box-shadow: 0 8px 32px rgba(0,0,0,0.15); }
+[data-theme="light"] .dp-freq-row { border-bottom-color: #ddd; }
+[data-theme="light"] .dp-btn { border-color: #ccc; }
+[data-theme="light"] .dp-btn:active { background: var(--accent); }
+[data-theme="light"] .dp-step-btn { border-color: var(--accent); }
+[data-theme="light"] .dp-step-size { border-color: #ccc; }
+[data-theme="light"] .dp-cancel { background: #e0e0e0; color: #555; }
+[data-theme="light"] .dp-clear { background: #e0e0e0; color: #333; }
+[data-theme="light"] #dial-pad-backdrop { background: rgba(0,0,0,0.3); }
+[data-theme="light"] .freq-step-btn { border-color: #ccc; }
 
 /* Settings overlay */
 [data-theme="light"] .so-header { border-bottom-color: #ddd; }
@@ -2357,6 +2798,75 @@ html, body {
 
   /* --- Log Toast --- */
   .log-toast { font-size: 15px; padding: 12px 24px; bottom: 160px; }
+}
+
+/* ========== PHONE LANDSCAPE ========== */
+@media (orientation: landscape) and (max-height: 500px) {
+  #status-bar { padding: 4px 12px; padding-left: calc(12px + env(safe-area-inset-left, 0px)); padding-right: calc(12px + env(safe-area-inset-right, 0px)); }
+  #freq-display { font-size: 18px; }
+  #mode-badge { font-size: 11px; padding: 1px 6px; }
+  #tab-bar .tab { padding: 5px 0; font-size: 11px; }
+  .tab-badge { font-size: 8px; min-width: 14px; height: 14px; line-height: 14px; top: 2px; right: -4px; }
+  #filter-toolbar { padding: 3px 8px; padding-left: calc(8px + env(safe-area-inset-left, 0px)); padding-right: calc(8px + env(safe-area-inset-right, 0px)); }
+  .rc-dropdown-btn { padding: 3px 8px; font-size: 11px; }
+  .rc-sort-select { height: 24px; font-size: 11px; }
+  #bottom-bar {
+    gap: 12px;
+    padding: 4px 16px;
+    padding-bottom: calc(4px + var(--safe-bottom));
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  }
+  .ptt-button { width: 52px; height: 52px; font-size: 14px; font-weight: 800; border-width: 3px; }
+  .estop-button { width: 36px; height: 36px; font-size: 8px; }
+  .audio-button { width: 36px; height: 36px; }
+  .audio-icon { font-size: 16px; }
+  .audio-label { font-size: 7px; max-width: 34px; }
+  .speaker-button { width: 36px; height: 36px; }
+  .speaker-icon { font-size: 16px; }
+  .speaker-label { font-size: 7px; }
+  #cw-panel { padding: 4px 12px; }
+  .cw-panel-row { gap: 6px; }
+  .cw-indicator { width: 10px; height: 10px; }
+  .cw-wpm-btn { width: 24px; height: 24px; font-size: 14px; }
+  .cw-wpm-label { font-size: 11px; min-width: 48px; }
+  .cw-mode-btn { padding: 2px 6px; font-size: 10px; }
+  .cw-slider { width: 40px; }
+  .cw-tone-label, .cw-vol-label, .cw-tone-val { font-size: 8px; }
+  #tx-banner { padding: 3px; font-size: 12px; letter-spacing: 1px; }
+  #activation-banner { padding: 4px 12px; padding-left: calc(12px + env(safe-area-inset-left, 0px)); }
+  .activation-ref { font-size: 13px; }
+  .activation-timer { font-size: 12px; }
+  .spot-card { padding: 6px 10px; gap: 6px; margin-bottom: 2px; }
+  .spot-call { font-size: 13px; min-width: 64px; }
+  .spot-freq { font-size: 12px; min-width: 58px; }
+  .spot-ref { font-size: 11px; }
+  .spot-age { font-size: 10px; }
+  .spot-mode { font-size: 10px; padding: 0 4px; }
+  .spot-dist { font-size: 10px; min-width: 40px; }
+  #log-sheet { max-height: 90vh; padding: 6px 12px calc(8px + var(--safe-bottom)); }
+  .log-sheet-title { font-size: 15px; margin-bottom: 8px; }
+  .log-field { margin-bottom: 6px; }
+  .log-field input, .log-field select { padding: 6px 10px; font-size: 14px; }
+  .log-actions { gap: 6px; margin-top: 6px; }
+  .log-btn-cancel, .log-btn-save { padding: 8px; font-size: 14px; }
+  .log-toast { bottom: 70px; }
+  #mode-picker { top: 32px; }
+  #dial-pad { width: 240px; padding: 10px; }
+  #dp-freq { font-size: 22px; }
+  .dp-btn { padding: 8px 0; font-size: 18px; }
+  .dp-grid { gap: 5px; margin-bottom: 8px; }
+  .dp-step-row { margin-bottom: 8px; }
+  .dp-step-btn { width: 44px; padding: 6px 0; font-size: 14px; }
+  .dp-actions { gap: 5px; }
+  .dp-cancel, .dp-clear, .dp-go { padding: 8px 0; font-size: 13px; }
+  .dp-freq-row { padding: 4px 0 8px; margin-bottom: 8px; }
+  #spot-list { padding: 2px 8px; padding-left: calc(8px + env(safe-area-inset-left, 0px)); padding-right: calc(8px + env(safe-area-inset-right, 0px)); }
+  .spot-log-btn { padding: 2px 8px; font-size: 10px; }
+  #settings-overlay { padding-top: 4px; }
+  .so-section-label { margin: 8px 0 4px; font-size: 10px; }
+  .so-row { padding: 6px 0; }
+  .so-label { font-size: 13px; }
 }
 
 /* ========== TABLET LANDSCAPE ========== */

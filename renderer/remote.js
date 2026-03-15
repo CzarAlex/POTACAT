@@ -11,6 +11,8 @@
   let storedToken = '';
   let reconnectTimer = null;
   let wasKicked = false;
+  let authMode = 'token'; // 'token' | 'club' | 'none'
+  let clubMember = null;  // { callsign, firstname, role, licenseClass }
   let pingInterval = null;
   let lastPingSent = 0;
 
@@ -23,6 +25,7 @@
   let gainNode = null;   // GainNode for volume amplification
   let volBoostLevel = 0; // 0=1x, 1=2x, 2=3x
   const VOL_STEPS = [1, 2, 3];
+  let sessionKeepAlive = null; // silent <audio> loop for Media Session anchor
 
   // Scan
   let scanning = false;
@@ -73,6 +76,17 @@
   const filterToolbar = document.getElementById('filter-toolbar');
   const sortSelect = document.getElementById('sort-select');
   const spotMapEl = document.getElementById('spot-map');
+  const dialPad = document.getElementById('dial-pad');
+  const dialPadBackdrop = document.getElementById('dial-pad-backdrop');
+  const dpFreq = document.getElementById('dp-freq');
+  const dpGo = document.getElementById('dp-go');
+  const dpCancel = document.getElementById('dp-cancel');
+  const dpClear = document.getElementById('dp-clear');
+  const dpStepUp = document.getElementById('dp-step-up');
+  const dpStepDown = document.getElementById('dp-step-down');
+  const dpStepSize = document.getElementById('dp-step-size');
+  const freqUpBtn = document.getElementById('freq-up-btn');
+  const freqDownBtn = document.getElementById('freq-down-btn');
   let spotSort = 'age';
   let spotMap = null;
   let spotMapLayer = null;
@@ -177,6 +191,7 @@
   const logFooterQueued = document.getElementById('log-footer-queued');
   const exportAdifBtn = document.getElementById('export-adif-btn');
   const bandFilterEl = document.getElementById('rc-band-filter');
+  const modeFilterEl = document.getElementById('rc-mode-filter');
   const regionFilterEl = document.getElementById('rc-region-filter');
   const spotsDropdown = document.getElementById('rc-spots-dropdown');
   const rcNewOnly = document.getElementById('rc-new-only');
@@ -355,45 +370,59 @@
   soThemeLight.addEventListener('click', () => applyTheme(true));
 
   // --- Connect ---
+  var clubCallInput = document.getElementById('club-callsign');
+  var clubPassInput = document.getElementById('club-password');
+  var tokenLoginDiv = document.getElementById('token-login');
+  var clubLoginDiv = document.getElementById('club-login');
+  var memberBadge = document.getElementById('member-badge');
+
   connectBtn.addEventListener('click', () => {
-    const token = tokenInput.value.trim().toUpperCase();
-    if (!token) return;
-    storedToken = token;
-    connectError.classList.add('hidden');
-    connectBtn.textContent = 'Connecting...';
-    connectBtn.disabled = true;
-    connect(token);
+    if (authMode === 'club') {
+      var call = clubCallInput.value.trim().toUpperCase();
+      var pass = clubPassInput.value;
+      if (!call || !pass) return;
+      connectError.classList.add('hidden');
+      connectBtn.textContent = 'Connecting...';
+      connectBtn.disabled = true;
+      connectClub(call, pass);
+    } else {
+      var token = tokenInput.value.trim().toUpperCase();
+      if (!token) return;
+      storedToken = token;
+      connectError.classList.add('hidden');
+      connectBtn.textContent = 'Connecting...';
+      connectBtn.disabled = true;
+      connect(token);
+    }
   });
 
   tokenInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') connectBtn.click();
   });
+  clubCallInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') clubPassInput.focus();
+  });
+  clubPassInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') connectBtn.click();
+  });
 
-  function connect(token) {
+  function openWs(onOpen) {
     wasKicked = false;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       ws.close();
     }
-
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${proto}//${location.host}`);
-
-    ws.onopen = () => {
-      if (token) {
-        ws.send(JSON.stringify({ type: 'auth', token }));
-      }
-    };
-
-    ws.onmessage = (event) => {
-      let msg;
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host);
+    ws.onopen = onOpen;
+    ws.onmessage = function(event) {
+      var msg;
       try { msg = JSON.parse(event.data); } catch { return; }
       handleMessage(msg);
     };
-
-    ws.onclose = () => {
+    ws.onclose = function() {
       clearInterval(pingInterval);
       pingInterval = null;
-      if (wasKicked) return; // don't auto-reconnect after kick
+      if (wasKicked) return;
       if (mainUI.classList.contains('hidden')) {
         connectBtn.textContent = 'Connect';
         connectBtn.disabled = false;
@@ -401,18 +430,62 @@
         scheduleReconnect();
       }
     };
+    ws.onerror = function() {};
+  }
 
-    ws.onerror = () => {};
+  function connect(token) {
+    openWs(function() {
+      if (token) {
+        ws.send(JSON.stringify({ type: 'auth', token: token }));
+      }
+    });
+  }
+
+  function connectClub(callsign, password) {
+    openWs(function() {
+      ws.send(JSON.stringify({ type: 'auth', callsign: callsign, password: password }));
+    });
   }
 
   function handleMessage(msg) {
     switch (msg.type) {
+      case 'auth-mode':
+        // Server tells us which login form to show
+        authMode = msg.mode || 'token';
+        if (authMode === 'club') {
+          tokenLoginDiv.classList.add('hidden');
+          clubLoginDiv.classList.remove('hidden');
+          connectBtn.textContent = 'Log In';
+        } else if (authMode === 'none') {
+          tokenLoginDiv.classList.add('hidden');
+          clubLoginDiv.classList.add('hidden');
+        } else {
+          tokenLoginDiv.classList.remove('hidden');
+          clubLoginDiv.classList.add('hidden');
+          connectBtn.textContent = 'Connect';
+        }
+        break;
+
       case 'auth-ok':
         connectScreen.classList.add('hidden');
         mainUI.classList.remove('hidden');
         tabBar.classList.remove('hidden');
-        connectBtn.textContent = 'Connect';
+        connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
+        // Club member info
+        if (msg.member) {
+          clubMember = msg.member;
+          memberBadge.textContent = msg.member.firstname + ' (' + msg.member.callsign + ')';
+          memberBadge.classList.remove('hidden');
+        } else {
+          clubMember = null;
+          memberBadge.classList.add('hidden');
+        }
+        // Schedule advisory
+        if (msg.scheduleAdvisory) {
+          var sa = msg.scheduleAdvisory;
+          showToast(sa.scheduledName + ' (' + sa.scheduledCallsign + ') is scheduled on ' + sa.radio + ' ' + sa.time, 6000);
+        }
         startPing();
         showWelcome();
         drainOfflineQueue();
@@ -420,6 +493,9 @@
           filterToolbar.classList.remove('hidden');
         }
         if (msg.colorblindMode) applyRemoteColorblind(true);
+        // CW keyer availability
+        cwAvailable = !!msg.cwAvailable;
+        cwPanel.classList.toggle('hidden', !cwAvailable);
         if (msg.settings) {
           myCallsign = msg.settings.myCallsign || '';
           phoneGrid = msg.settings.grid || phoneGrid;
@@ -438,7 +514,17 @@
           soMaxageVal.textContent = maxAgeMin + 'm';
           soDistMi.classList.toggle('active', distUnit === 'mi');
           soDistKm.classList.toggle('active', distUnit === 'km');
+          if (msg.settings.remoteCwMacros) syncMacrosFromSettings(msg.settings.remoteCwMacros);
         }
+        updateCwEnableBtn();
+        break;
+
+      case 'tune-blocked':
+        showToast(msg.reason || 'Tune blocked by license restrictions', 4000);
+        break;
+
+      case 'rig-blocked':
+        showToast(msg.reason || 'You do not have access to this radio', 4000);
         break;
 
       case 'colorblind-mode':
@@ -448,7 +534,7 @@
       case 'auth-fail':
         connectError.textContent = msg.reason || 'Authentication failed';
         connectError.classList.remove('hidden');
-        connectBtn.textContent = 'Connect';
+        connectBtn.textContent = authMode === 'club' ? 'Log In' : 'Connect';
         connectBtn.disabled = false;
         break;
 
@@ -489,6 +575,27 @@
         connectBtn.disabled = false;
         break;
 
+      case 'cw-available':
+        cwAvailable = !!msg.enabled;
+        cwPanel.classList.toggle('hidden', !cwAvailable);
+        updateCwEnableBtn();
+        break;
+
+      case 'cw-state':
+        cwIndicator.classList.toggle('active', !!msg.keying);
+        handleCwSidetone(!!msg.keying);
+        break;
+
+      case 'cw-config-ack':
+        if (msg.wpm) { cwWpm = msg.wpm; cwWpmLabel.textContent = cwWpm + ' WPM'; }
+        if (msg.mode) {
+          cwMode = msg.mode;
+          cwModeB.classList.toggle('active', cwMode === 'iambicB');
+          cwModeA.classList.toggle('active', cwMode === 'iambicA');
+          cwModeStr.classList.toggle('active', cwMode === 'straight');
+        }
+        break;
+
       case 'sources':
         if (msg.data) {
           const map = { pota: 'pota', sota: 'sota', wwff: 'wwff', llota: 'llota', cluster: 'dxc' };
@@ -501,6 +608,10 @@
 
       case 'rigs':
         updateRigSelect(msg.data || [], msg.activeRigId);
+        break;
+
+      case 'echo-filters':
+        applyFilters(msg.data);
         break;
 
       case 'log-ok':
@@ -675,9 +786,9 @@
       modeBadge.textContent = s.mode;
       currentMode = s.mode;
       const m = s.mode.toUpperCase();
-      const isSSB = (m === 'SSB' || m === 'USB' || m === 'LSB');
-      pttBtn.classList.toggle('hidden', !isSSB);
-      estopBtn.classList.toggle('hidden', !isSSB);
+      const isVoice = (m === 'SSB' || m === 'USB' || m === 'LSB' || m === 'FM' || m === 'AM');
+      pttBtn.classList.toggle('hidden', !isVoice);
+      estopBtn.classList.toggle('hidden', !isVoice);
     }
     if (s.catConnected !== undefined) {
       catDot.classList.toggle('connected', s.catConnected);
@@ -776,11 +887,24 @@
     return workedQsos.has((s.callsign || '').toUpperCase());
   }
 
+  // Map spot mode to filter category
+  var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'FM', 'RTTY']);
+  function spotModeCategory(mode) {
+    if (!mode) return 'other';
+    var m = mode.toUpperCase();
+    if (m === 'USB' || m === 'LSB') return 'SSB';
+    if (m === 'AM') return 'other';
+    if (KNOWN_MODES.has(m)) return m;
+    return 'other';
+  }
+
   function getFilteredSpots() {
     const bands = getDropdownValues(bandFilterEl);
+    const modes = getDropdownValues(modeFilterEl);
     const regions = getDropdownValues(regionFilterEl);
     const filtered = spots.filter(s => {
       if (bands && !bands.has(s.band)) return false;
+      if (modes && !modes.has(spotModeCategory(s.mode))) return false;
       if (regions && s.continent && !regions.has(s.continent)) return false;
       if (showNewOnly && !isNewPark(s)) return false;
       if (hideWorked && isWorkedSpot(s)) return false;
@@ -1041,8 +1165,9 @@
   }
 
   // Initialize band and region dropdowns
-  initMultiDropdown(bandFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); });
-  initMultiDropdown(regionFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); });
+  initMultiDropdown(bandFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); sendFilters(); });
+  initMultiDropdown(modeFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); sendFilters(); });
+  initMultiDropdown(regionFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); sendFilters(); });
 
   // --- Spots dropdown ---
   spotsDropdown.querySelector('.rc-dropdown-btn').addEventListener('click', (e) => {
@@ -1064,10 +1189,12 @@
       showNewOnly = cb.checked;
       renderSpots();
       if (activeTab === 'map') renderMapSpots();
+      sendFilters();
     } else if (cb.id === 'rc-hide-worked') {
       hideWorked = cb.checked;
       renderSpots();
       if (activeTab === 'map') renderMapSpots();
+      sendFilters();
     }
   });
 
@@ -1076,19 +1203,77 @@
     document.querySelectorAll('.rc-dropdown.open').forEach(d => d.classList.remove('open'));
   });
 
+  // --- Filter persistence (sync to desktop settings.json) ---
+  function getFilterValues(container) {
+    const allCb = container.querySelector('input[value="all"]');
+    if (allCb && allCb.checked) return null;
+    const checked = [...container.querySelectorAll('input:not([value="all"]):checked')];
+    if (checked.length === 0) return null;
+    return checked.map(cb => cb.value);
+  }
+  function sendFilters() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'set-echo-filters',
+      filters: {
+        bands: getFilterValues(bandFilterEl),
+        modes: getFilterValues(modeFilterEl),
+        regions: getFilterValues(regionFilterEl),
+        sort: spotSort,
+        newOnly: showNewOnly,
+        hideWorked: hideWorked,
+      }
+    }));
+  }
+  function applyFilters(f) {
+    if (!f) return;
+    [bandFilterEl, modeFilterEl, regionFilterEl].forEach((el, i) => {
+      const vals = [f.bands, f.modes, f.regions][i];
+      const allCb = el.querySelector('input[value="all"]');
+      const itemCbs = [...el.querySelectorAll('input:not([value="all"])')];
+      if (!vals) {
+        allCb.checked = true;
+        itemCbs.forEach(cb => { cb.checked = false; });
+      } else {
+        const set = new Set(vals);
+        allCb.checked = false;
+        itemCbs.forEach(cb => { cb.checked = set.has(cb.value); });
+      }
+      // Update dropdown text
+      const textEl = el.querySelector('.rc-dd-text');
+      if (textEl) {
+        const checked = itemCbs.filter(cb => cb.checked);
+        if (allCb.checked || checked.length === 0) { textEl.textContent = 'All'; }
+        else if (checked.length <= 2) { textEl.textContent = checked.map(cb => cb.value).join(', '); }
+        else { textEl.textContent = checked.length + ' sel'; }
+      }
+    });
+    if (f.sort) { spotSort = f.sort; sortSelect.value = f.sort; }
+    if (f.newOnly != null) {
+      showNewOnly = f.newOnly;
+      const cb = document.getElementById('rc-new-only');
+      if (cb) cb.checked = f.newOnly;
+    }
+    if (f.hideWorked != null) {
+      hideWorked = f.hideWorked;
+      const cb = document.getElementById('rc-hide-worked');
+      if (cb) cb.checked = f.hideWorked;
+    }
+    renderSpots();
+    if (activeTab === 'map') renderMapSpots();
+  }
+
   // --- Sort ---
   sortSelect.addEventListener('change', () => {
     spotSort = sortSelect.value;
     renderSpots();
     if (activeTab === 'map') renderMapSpots();
+    sendFilters();
   });
 
-  // --- Frequency direct input ---
+  // --- Frequency direct input (legacy — kept for keyboard fallback) ---
   freqDisplay.addEventListener('click', () => {
-    statusBar.classList.add('editing');
-    freqInput.value = currentFreqKhz ? Math.round(currentFreqKhz * 10) / 10 : '';
-    freqInput.focus();
-    freqInput.select();
+    openDialPad();
   });
 
   function submitFreq() {
@@ -1117,6 +1302,129 @@
     setTimeout(() => {
       if (statusBar.classList.contains('editing')) cancelFreqEdit();
     }, 200);
+  });
+
+  // --- Dial Pad ---
+  const STEP_SIZES = [0.1, 0.5, 1, 5, 10, 25, 100];
+  let dpStepIdx = 2; // default 1 kHz
+  let dpInput = '';
+
+  function openDialPad() {
+    dpInput = currentFreqKhz ? (Math.round(currentFreqKhz * 10) / 10).toString() : '';
+    updateDpDisplay();
+    dialPad.classList.remove('hidden');
+    dialPadBackdrop.classList.remove('hidden');
+  }
+
+  function closeDialPad() {
+    dialPad.classList.add('hidden');
+    dialPadBackdrop.classList.add('hidden');
+  }
+
+  function updateDpDisplay() {
+    if (!dpInput) {
+      dpFreq.textContent = '---.---.---';
+      dpFreq.classList.add('empty');
+    } else {
+      dpFreq.classList.remove('empty');
+      // Format as MHz.kHz.Hz display
+      const val = parseFloat(dpInput);
+      if (!isNaN(val) && val > 0) {
+        const hz = Math.round(val * 1000);
+        dpFreq.textContent = formatFreq(hz);
+      } else {
+        dpFreq.textContent = dpInput;
+      }
+    }
+  }
+
+  function dpTune(freqKhz) {
+    if (!freqKhz || isNaN(freqKhz) || freqKhz < 100 || freqKhz > 500000) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'tune', freqKhz: freqKhz.toString(), mode: '' }));
+    }
+    // Immediately update local display
+    const hz = Math.round(freqKhz * 1000);
+    freqDisplay.textContent = formatFreq(hz);
+    currentFreqKhz = freqKhz;
+  }
+
+  // Number button clicks
+  dialPad.querySelector('.dp-grid').addEventListener('click', (e) => {
+    const btn = e.target.closest('.dp-btn');
+    if (!btn) return;
+    const val = btn.dataset.val;
+    if (val === 'del') {
+      dpInput = dpInput.slice(0, -1);
+    } else if (val === '.') {
+      if (!dpInput.includes('.')) dpInput += dpInput ? '.' : '0.';
+    } else {
+      dpInput += val;
+    }
+    updateDpDisplay();
+  });
+
+  dpGo.addEventListener('click', () => {
+    const val = parseFloat(dpInput);
+    dpTune(val);
+    closeDialPad();
+  });
+
+  dpCancel.addEventListener('click', closeDialPad);
+  dialPadBackdrop.addEventListener('click', closeDialPad);
+
+  dpClear.addEventListener('click', () => {
+    dpInput = '';
+    updateDpDisplay();
+  });
+
+  // Step size cycle
+  function updateStepLabel() {
+    const s = STEP_SIZES[dpStepIdx];
+    dpStepSize.textContent = s >= 1 ? s + ' kHz' : (s * 1000) + ' Hz';
+  }
+  updateStepLabel();
+
+  dpStepSize.addEventListener('click', () => {
+    dpStepIdx = (dpStepIdx + 1) % STEP_SIZES.length;
+    updateStepLabel();
+  });
+
+  // Step up/down inside dial pad — tunes immediately
+  dpStepUp.addEventListener('click', () => {
+    const step = STEP_SIZES[dpStepIdx];
+    const base = dpInput ? parseFloat(dpInput) : currentFreqKhz;
+    if (!base || isNaN(base)) return;
+    const newFreq = Math.round((base + step) * 10) / 10;
+    dpInput = newFreq.toString();
+    updateDpDisplay();
+    dpTune(newFreq);
+  });
+
+  dpStepDown.addEventListener('click', () => {
+    const step = STEP_SIZES[dpStepIdx];
+    const base = dpInput ? parseFloat(dpInput) : currentFreqKhz;
+    if (!base || isNaN(base)) return;
+    const newFreq = Math.round((base - step) * 10) / 10;
+    if (newFreq < 100) return;
+    dpInput = newFreq.toString();
+    updateDpDisplay();
+    dpTune(newFreq);
+  });
+
+  // Status bar up/down buttons — quick step without opening dial pad
+  freqUpBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const step = STEP_SIZES[dpStepIdx];
+    const newFreq = Math.round((currentFreqKhz + step) * 10) / 10;
+    dpTune(newFreq);
+  });
+
+  freqDownBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const step = STEP_SIZES[dpStepIdx];
+    const newFreq = Math.round((currentFreqKhz - step) * 10) / 10;
+    if (newFreq >= 100) dpTune(newFreq);
   });
 
   // --- PTT ---
@@ -1180,24 +1488,63 @@
     }
   });
 
-  // --- Bluetooth earbud PTT (Media Session API) ---
-  // Pixel Buds, AirPods, etc. fire play/pause on single tap.
-  // Toggle PTT: tap to start transmitting, tap again to stop.
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('pause', () => {
-      if (!audioEnabled) return;
-      if (pttDown) pttStop(); else pttStart();
-      // Keep media session in "playing" state so next tap fires again
-      navigator.mediaSession.playbackState = 'playing';
-      if (remoteAudio) remoteAudio.play().catch(() => {});
-    });
-    navigator.mediaSession.setActionHandler('play', () => {
-      if (!audioEnabled) return;
-      if (pttDown) pttStop(); else pttStart();
-      navigator.mediaSession.playbackState = 'playing';
-      if (remoteAudio) remoteAudio.play().catch(() => {});
-    });
+  // --- Earbud/headset PTT (Media Session API + MediaPlayPause key) ---
+  // Supports Bluetooth (Pixel Buds, AirPods) and wired earbuds with play/pause button.
+  // Toggle PTT: press to start transmitting, press again to stop.
+
+  // Create a silent audio loop to reliably anchor the Media Session.
+  // WebRTC <video> elements are unreliable as session anchors — iOS can pause them
+  // and Android wired earbuds may not recognize them as active media.
+  function startSessionKeepAlive() {
+    if (sessionKeepAlive) return;
+    // Build a minimal silent WAV in memory (0.25s, 8kHz, mono, 8-bit unsigned PCM)
+    const numSamples = 2000;
+    const buf = new ArrayBuffer(44 + numSamples);
+    const v = new DataView(buf);
+    // RIFF header
+    v.setUint32(0, 0x52494646, false); v.setUint32(4, 36 + numSamples, true);
+    v.setUint32(8, 0x57415645, false);
+    // fmt chunk
+    v.setUint32(12, 0x666d7420, false); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 8000, true); v.setUint32(28, 8000, true);
+    v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+    // data chunk — 128 = silence for unsigned 8-bit PCM
+    v.setUint32(36, 0x64617461, false); v.setUint32(40, numSamples, true);
+    for (let i = 44; i < 44 + numSamples; i++) v.setUint8(i, 128);
+    const blob = new Blob([buf], { type: 'audio/wav' });
+    sessionKeepAlive = new Audio(URL.createObjectURL(blob));
+    sessionKeepAlive.loop = true;
+    sessionKeepAlive.volume = 0.01;
+    sessionKeepAlive.play().catch(() => {});
   }
+
+  function stopSessionKeepAlive() {
+    if (!sessionKeepAlive) return;
+    sessionKeepAlive.pause();
+    if (sessionKeepAlive.src) URL.revokeObjectURL(sessionKeepAlive.src);
+    sessionKeepAlive = null;
+  }
+
+  function mediaTogglePtt() {
+    if (!audioEnabled) return;
+    if (pttDown) pttStop(); else pttStart();
+    // Re-assert playing state so the next button press fires again
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    if (sessionKeepAlive) sessionKeepAlive.play().catch(() => {});
+  }
+
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.setActionHandler('pause', mediaTogglePtt);
+    navigator.mediaSession.setActionHandler('play', mediaTogglePtt);
+    // Some devices/OS versions fire 'stop' instead of 'pause'
+    try { navigator.mediaSession.setActionHandler('stop', mediaTogglePtt); } catch (_) {}
+  }
+
+  // Wired earbud play/pause button — fires as a keyboard event on Android
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'MediaPlayPause') { e.preventDefault(); mediaTogglePtt(); }
+  });
 
   // --- Settings Overlay ---
   rigCtrlToggle.addEventListener('click', () => {
@@ -1496,7 +1843,8 @@
       audioBtn.classList.add('active');
       audioDot.classList.remove('hidden');
       volBoostBtn.classList.remove('hidden');
-      // Activate Media Session so Bluetooth earbud buttons work for PTT
+      // Activate Media Session so earbud play/pause button works for PTT
+      startSessionKeepAlive();
       if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({ title: 'ECHOCAT', artist: 'POTACAT' });
         navigator.mediaSession.playbackState = 'playing';
@@ -1512,6 +1860,7 @@
     if (localAudioStream) { localAudioStream.getTracks().forEach(t => t.stop()); localAudioStream = null; }
     if (remoteAudio) { remoteAudio.srcObject = null; }
     if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; gainNode = null; }
+    stopSessionKeepAlive();
     audioEnabled = false;
     micReady = false;
     volBoostLevel = 0;
@@ -1624,9 +1973,15 @@
   function scheduleReconnect() {
     if (reconnectTimer) return;
     latencyEl.textContent = '--ms';
-    reconnectTimer = setTimeout(() => {
+    reconnectTimer = setTimeout(function() {
       reconnectTimer = null;
-      connect(storedToken || '');
+      if (authMode === 'club') {
+        var call = clubCallInput.value.trim().toUpperCase();
+        var pass = clubPassInput.value;
+        if (call && pass) connectClub(call, pass);
+      } else {
+        connect(storedToken || '');
+      }
     }, 3000);
   }
 
@@ -1982,17 +2337,20 @@
 
   let toastTimer = null;
   function showLogToast(msg, isError) {
+    showToast(msg, isError ? 3000 : 2500, isError);
+  }
+  function showToast(msg, duration, isError) {
     if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
     logToast.textContent = msg;
     logToast.classList.remove('hidden', 'fade-out', 'error');
     if (isError) logToast.classList.add('error');
-    toastTimer = setTimeout(() => {
+    toastTimer = setTimeout(function() {
       logToast.classList.add('fade-out');
-      setTimeout(() => {
+      setTimeout(function() {
         logToast.classList.add('hidden');
         logToast.classList.remove('fade-out', 'error');
       }, 400);
-    }, 2500);
+    }, duration || 2500);
   }
 
   // =============================================
@@ -3346,6 +3704,289 @@
     ft8TxFreqHz = hz;
     ft8TxFreqDisplay.textContent = 'TX: ' + hz + ' Hz';
     ft8Send({ type: 'jtcat-set-tx-freq', hz });
+  });
+
+  // --- CW Keyer ---
+  let cwAvailable = false;
+  let cwWpm = 20;
+  let cwMode = 'iambicB';
+  let cwSidetoneFreq = 600;
+  let cwSidetoneVol = 0.8;
+  let cwAudioCtx = null;
+  let cwOsc = null;
+  let cwGain = null;
+  let cwKeying = false;
+
+  // Default macros — overridden by server settings if configured
+  var DEFAULT_CW_MACROS = [
+    { label: 'CQ', text: 'CQ CQ CQ DE {MYCALL} {MYCALL} K' },
+    { label: '599', text: 'R UR 599 5NN BK' },
+    { label: '73', text: 'RR 73 E E' },
+    { label: 'AGN', text: 'AGN AGN PSE' },
+    { label: 'TU', text: 'TU DE {MYCALL} K' },
+  ];
+  var cwMacros = JSON.parse(localStorage.getItem('echocat-cw-macros') || 'null') || DEFAULT_CW_MACROS.slice();
+
+  const cwPanel = document.getElementById('cw-panel');
+  const cwIndicator = document.getElementById('cw-indicator');
+  const cwWpmLabel = document.getElementById('cw-wpm-label');
+  const cwWpmDn = document.getElementById('cw-wpm-dn');
+  const cwWpmUp = document.getElementById('cw-wpm-up');
+  const cwModeB = document.getElementById('cw-mode-b');
+  const cwModeA = document.getElementById('cw-mode-a');
+  const cwModeStr = document.getElementById('cw-mode-str');
+  const cwToneSlider = document.getElementById('cw-tone-slider');
+  const cwToneVal = document.getElementById('cw-tone-val');
+  const cwVolSlider = document.getElementById('cw-vol-slider');
+  const cwMacroRow = document.getElementById('cw-macro-row');
+  const cwTextInput = document.getElementById('cw-text-input');
+  const cwTextSend = document.getElementById('cw-text-send');
+  const soCwEnable = document.getElementById('so-cw-enable');
+  const soCwMacros = document.getElementById('so-cw-macros');
+
+  // Unlock AudioContext on first user interaction (Chromium autoplay policy)
+  var cwAudioUnlocked = false;
+  function ensureCwAudioCtx() {
+    if (!cwAudioCtx) {
+      cwAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (cwAudioCtx.state === 'suspended') {
+      cwAudioCtx.resume();
+    }
+    return cwAudioCtx;
+  }
+
+  document.addEventListener('touchstart', function unlockCwAudio() {
+    ensureCwAudioCtx();
+    cwAudioUnlocked = true;
+    document.removeEventListener('touchstart', unlockCwAudio);
+  }, { once: true });
+  document.addEventListener('click', function unlockCwAudioClick() {
+    ensureCwAudioCtx();
+    cwAudioUnlocked = true;
+    document.removeEventListener('click', unlockCwAudioClick);
+  }, { once: true });
+
+  function handleCwSidetone(keying) {
+    cwKeying = keying;
+    if (!cwAudioCtx) ensureCwAudioCtx();
+    if (keying) {
+      if (cwOsc) return; // already playing
+      cwOsc = cwAudioCtx.createOscillator();
+      cwOsc.type = 'sine';
+      cwOsc.frequency.value = cwSidetoneFreq;
+      cwGain = cwAudioCtx.createGain();
+      cwGain.gain.value = 0;
+      cwOsc.connect(cwGain);
+      cwGain.connect(cwAudioCtx.destination);
+      cwOsc.start();
+      cwGain.gain.linearRampToValueAtTime(cwSidetoneVol, cwAudioCtx.currentTime + 0.005);
+    } else {
+      if (cwGain) {
+        cwGain.gain.linearRampToValueAtTime(0, cwAudioCtx.currentTime + 0.005);
+      }
+      if (cwOsc) {
+        var osc = cwOsc;
+        setTimeout(function() { try { osc.stop(); } catch(e){} }, 10);
+        cwOsc = null;
+        cwGain = null;
+      }
+    }
+  }
+
+  function sendCwConfig() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cw-config', wpm: cwWpm, mode: cwMode }));
+    }
+  }
+
+  function sendCwText(text) {
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'cw-text', text: text }));
+  }
+
+  // --- Macro buttons ---
+  function renderCwMacros() {
+    cwMacroRow.innerHTML = '';
+    cwMacros.forEach(function(m, i) {
+      if (!m.label && !m.text) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cw-macro-btn';
+      btn.textContent = m.label || ('M' + (i + 1));
+      btn.title = m.text || '';
+      btn.addEventListener('click', function() {
+        if (m.text) {
+          sendCwText(m.text);
+          btn.classList.add('sending');
+          setTimeout(function() { btn.classList.remove('sending'); }, 500);
+        }
+      });
+      cwMacroRow.appendChild(btn);
+    });
+  }
+  renderCwMacros();
+
+  // --- Free-text CW input ---
+  cwTextSend.addEventListener('click', function() {
+    var text = cwTextInput.value.trim();
+    if (text) {
+      sendCwText(text);
+      cwTextInput.value = '';
+    }
+  });
+  cwTextInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      cwTextSend.click();
+    }
+  });
+
+  // --- Settings: CW enable toggle ---
+  function updateCwEnableBtn() {
+    soCwEnable.textContent = cwAvailable ? 'On' : 'Off';
+    soCwEnable.classList.toggle('active', cwAvailable);
+    soCwMacros.classList.toggle('hidden', !cwAvailable);
+  }
+
+  soCwEnable.addEventListener('click', function() {
+    var newState = !cwAvailable;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cw-enable', enabled: newState }));
+    }
+    // Optimistic update — server will confirm with cw-available
+    cwAvailable = newState;
+    cwPanel.classList.toggle('hidden', !cwAvailable);
+    updateCwEnableBtn();
+  });
+
+  // --- Settings: CW macro editor ---
+  function loadMacroEditor() {
+    for (var i = 0; i < 5; i++) {
+      var row = document.getElementById('so-macro-' + (i + 1));
+      if (!row) continue;
+      var labelInput = row.querySelector('.so-macro-label');
+      var textInput = row.querySelector('.so-macro-text');
+      var m = cwMacros[i] || { label: '', text: '' };
+      labelInput.value = m.label || '';
+      textInput.value = m.text || '';
+    }
+  }
+
+  function saveMacrosFromEditor() {
+    var newMacros = [];
+    for (var i = 0; i < 5; i++) {
+      var row = document.getElementById('so-macro-' + (i + 1));
+      if (!row) continue;
+      var labelInput = row.querySelector('.so-macro-label');
+      var textInput = row.querySelector('.so-macro-text');
+      newMacros.push({
+        label: (labelInput.value || '').trim(),
+        text: (textInput.value || '').trim().toUpperCase(),
+      });
+    }
+    cwMacros = newMacros;
+    localStorage.setItem('echocat-cw-macros', JSON.stringify(cwMacros));
+    renderCwMacros();
+  }
+
+  // Auto-save macros on blur from any macro editor input
+  soCwMacros.addEventListener('focusout', function() {
+    saveMacrosFromEditor();
+  });
+
+  // Load macro editor when settings opened
+  var origRigToggle = document.getElementById('rig-ctrl-toggle');
+  if (origRigToggle) {
+    origRigToggle.addEventListener('click', function() {
+      loadMacroEditor();
+      updateCwEnableBtn();
+    });
+  }
+
+  // Sync macros from server settings (if configured on desktop)
+  function syncMacrosFromSettings(serverMacros) {
+    if (serverMacros && Array.isArray(serverMacros) && serverMacros.length > 0) {
+      // Only overwrite if user hasn't customized locally
+      var localCustom = localStorage.getItem('echocat-cw-macros');
+      if (!localCustom) {
+        cwMacros = serverMacros;
+        renderCwMacros();
+      }
+    }
+  }
+
+  // WPM buttons
+  cwWpmDn.addEventListener('click', function() {
+    cwWpm = Math.max(5, cwWpm - 1);
+    cwWpmLabel.textContent = cwWpm + ' WPM';
+    sendCwConfig();
+  });
+  cwWpmUp.addEventListener('click', function() {
+    cwWpm = Math.min(50, cwWpm + 1);
+    cwWpmLabel.textContent = cwWpm + ' WPM';
+    sendCwConfig();
+  });
+
+  // Mode buttons
+  [cwModeB, cwModeA, cwModeStr].forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      cwMode = btn.dataset.mode;
+      cwModeB.classList.toggle('active', cwMode === 'iambicB');
+      cwModeA.classList.toggle('active', cwMode === 'iambicA');
+      cwModeStr.classList.toggle('active', cwMode === 'straight');
+      sendCwConfig();
+    });
+  });
+
+  // Sidetone frequency slider
+  cwToneSlider.addEventListener('input', function() {
+    cwSidetoneFreq = parseInt(cwToneSlider.value, 10);
+    cwToneVal.textContent = cwSidetoneFreq;
+    if (cwOsc) cwOsc.frequency.value = cwSidetoneFreq;
+  });
+
+  // Sidetone volume slider
+  cwVolSlider.addEventListener('input', function() {
+    cwSidetoneVol = parseInt(cwVolSlider.value, 10) / 100;
+    if (cwGain && cwKeying) cwGain.gain.value = cwSidetoneVol;
+  });
+
+  // --- Keyboard paddle input (TinyMIDI Keyboard mode: [ = dit, ] = dah) ---
+  var ditDown = false;
+  var dahDown = false;
+
+  function sendPaddle(contact, state) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
+    }
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (!cwAvailable) return;
+    if (e.repeat) return;
+    if (isInputFocused()) return;
+    if (e.key === '[') {
+      e.preventDefault();
+      if (!ditDown) { ditDown = true; sendPaddle('dit', 1); }
+    } else if (e.key === ']') {
+      e.preventDefault();
+      if (!dahDown) { dahDown = true; sendPaddle('dah', 1); }
+    }
+  });
+
+  document.addEventListener('keyup', function(e) {
+    if (!cwAvailable) return;
+    if (isInputFocused()) return;
+    if (e.key === '[') {
+      e.preventDefault();
+      ditDown = false;
+      sendPaddle('dit', 0);
+    } else if (e.key === ']') {
+      e.preventDefault();
+      dahDown = false;
+      sendPaddle('dah', 0);
+    }
   });
 
   // Auto-connect on page load

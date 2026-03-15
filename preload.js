@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('api', {
   onRbnSpots: (cb) => ipcRenderer.on('rbn-spots', (_e, data) => cb(data)),
   onRbnStatus: (cb) => ipcRenderer.on('rbn-status', (_e, s) => cb(s)),
   onPskrStatus: (cb) => ipcRenderer.on('pskr-status', (_e, s) => cb(s)),
+  onAgStatus: (cb) => ipcRenderer.on('ag-status', (_e, s) => cb(s)),
+  onAgAntennaNames: (cb) => ipcRenderer.on('ag-antenna-names', (_e, names) => cb(names)),
+  onAgPortStatus: (cb) => ipcRenderer.on('ag-port-status', (_e, s) => cb(s)),
   clearRbn: () => ipcRenderer.send('rbn-clear'),
   onSolarData: (cb) => ipcRenderer.on('solar-data', (_e, d) => cb(d)),
   onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_e, d) => cb(d)),
@@ -67,6 +70,10 @@ contextBridge.exposeInMainWorld('api', {
   onQrzData: (cb) => ipcRenderer.on('qrz-data', (_e, data) => cb(data)),
   onDonorCallsigns: (cb) => ipcRenderer.on('donor-callsigns', (_e, data) => cb(data)),
   onExpeditionCallsigns: (cb) => ipcRenderer.on('expedition-callsigns', (_e, data) => cb(data)),
+  // Directory (HF Nets & SWL Broadcasts)
+  onDirectoryData: (cb) => ipcRenderer.on('directory-data', (_e, data) => cb(data)),
+  fetchDirectory: () => ipcRenderer.send('fetch-directory'),
+  getDirectory: () => ipcRenderer.invoke('get-directory'),
   // Events system
   onActiveEvents: (cb) => ipcRenderer.on('active-events', (_e, data) => cb(data)),
   getActiveEvents: () => ipcRenderer.invoke('get-active-events'),
@@ -86,6 +93,7 @@ contextBridge.exposeInMainWorld('api', {
   sendPopoutHome: (data) => ipcRenderer.send('popout-map-home', data),
   sendPopoutTheme: (theme) => ipcRenderer.send('popout-map-theme', theme),
   sendColorblindMode: (enabled) => ipcRenderer.send('colorblind-mode', enabled),
+  sendWcagMode: (enabled) => ipcRenderer.send('wcag-mode', enabled),
   onPopoutMapStatus: (cb) => ipcRenderer.on('popout-map-status', (_e, open) => cb(open)),
   onPopoutOpenLog: (cb) => ipcRenderer.on('popout-open-log', (_e, spot) => cb(spot)),
   // Pop-out QSO log
@@ -165,6 +173,11 @@ contextBridge.exposeInMainWorld('api', {
   onCwText: (cb) => ipcRenderer.on('cw-text', (_e, data) => cb(data)),
   // Remote Access
   getLocalIPs: () => ipcRenderer.invoke('get-local-ips'),
+  // Club Station Mode
+  chooseClubCsvFile: () => ipcRenderer.invoke('choose-club-csv-file'),
+  previewClubCsv: (csvPath) => ipcRenderer.invoke('preview-club-csv', csvPath),
+  hashClubPasswords: (csvPath) => ipcRenderer.invoke('hash-club-passwords', csvPath),
+  createClubCsv: (rigNames) => ipcRenderer.invoke('create-club-csv', rigNames),
   onRemoteTxState: (cb) => ipcRenderer.on('remote-tx-state', (_e, state) => cb(state)),
   onRemoteStatus: (cb) => ipcRenderer.on('remote-status', (_e, s) => cb(s)),
   onReloadPrefs: (cb) => ipcRenderer.on('reload-prefs', () => cb()),

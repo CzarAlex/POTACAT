@@ -19,15 +19,19 @@ const { RbnClient } = require('./lib/rbn');
 const { appendQso, buildAdifRecord, appendImportedQso, appendRawQso, rewriteAdifFile, ADIF_HEADER, adifField } = require('./lib/adif-writer');
 const { SmartSdrClient, setColorblindMode: setSmartSdrColorblind } = require('./lib/smartsdr');
 const { TciClient, setTciColorblindMode } = require('./lib/tci');
+const { AntennaGeniusClient } = require('./lib/antenna-genius');
 const { IambicKeyer } = require('./lib/keyer');
 const { parsePotaParksCSV } = require('./lib/pota-parks');
 const { WsjtxClient, encodeHeartbeat, encodeLoggedAdif, encodeQsoLogged } = require('./lib/wsjtx');
 const { PskrClient } = require('./lib/pskreporter');
 const { Ft8Engine } = require('./lib/ft8-engine');
 const { RemoteServer } = require('./lib/remote-server');
+const { loadClubUsers, hashPasswords, hasPlaintextPasswords } = require('./lib/club-users');
+const { createAuditLogger } = require('./lib/club-audit');
 const { fetchSpots: fetchWwffSpots } = require('./lib/wwff');
 const { fetchSpots: fetchLlotaSpots } = require('./lib/llota');
 const { postWwffRespot } = require('./lib/wwff-respot');
+const { fetchNets: fetchDirectoryNets, fetchSwl: fetchDirectorySwl } = require('./lib/directory');
 const { QrzClient } = require('./lib/qrz');
 const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, getPark: getParkDb, buildParksMap } = require('./lib/pota-parks-db');
 const { fetchDxCalExpeditions } = require('./lib/dxcal');
@@ -85,6 +89,8 @@ let smartSdr = null;
 let smartSdrPushTimer = null; // throttle timer for SmartSDR spot pushes
 let tciClient = null;
 let tciPushTimer = null; // throttle timer for TCI spot pushes
+let agClient = null; // 4O3A Antenna Genius client
+let agLastBand = null; // last band we switched to (avoid redundant commands)
 let workedQsos = new Map(); // callsign → [{date, ref}] from QSO log (all QSOs, not just confirmed)
 let workedParks = new Map(); // reference → park data from POTA parks CSV
 let wsjtx = null;
@@ -95,11 +101,15 @@ let expeditionCallsigns = new Set(); // active DX expeditions from Club Log + da
 let expeditionMeta = new Map(); // callsign → { entity, startDate, endDate, description }
 let activeEvents = [];                // events fetched from remote endpoint
 const EVENTS_CACHE_PATH = path.join(app.getPath('userData'), 'events-cache.json');
+let directoryNets = [];               // HF nets from community Google Sheet
+let directorySwl = [];                // SWL broadcasts from community Google Sheet
+const DIRECTORY_CACHE_PATH = path.join(app.getPath('userData'), 'directory-cache.json');
 let pskr = null;
 let pskrSpots = [];       // streaming PSKReporter FreeDV spots (FIFO, max 500)
 let pskrFlushTimer = null; // throttle timer for PSKReporter → renderer updates
 let keyer = null;          // IambicKeyer instance for CW MIDI keying
 let remoteServer = null;   // RemoteServer instance for phone remote access
+let cwKeyPort = null;      // Dedicated SerialPort for DTR CW keying (external USB-serial adapter)
 let remoteAudioWin = null; // hidden BrowserWindow for WebRTC audio bridge
 let _currentFreqHz = 0;    // tracked for remote radio status
 let _currentMode = '';
@@ -221,19 +231,27 @@ function findRigctld() {
   }
 
   // Check bundled path (packaged app vs dev)
+  const isWin = process.platform === 'win32';
+  const rigBin = isWin ? 'rigctld.exe' : 'rigctld';
   const bundledPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'hamlib', 'rigctld.exe')
-    : path.join(__dirname, 'assets', 'hamlib', 'rigctld.exe');
+    ? path.join(process.resourcesPath, 'hamlib', rigBin)
+    : path.join(__dirname, 'assets', 'hamlib', rigBin);
   try {
     fs.accessSync(bundledPath, fs.constants.X_OK);
     return bundledPath;
   } catch { /* fall through */ }
 
-  // Check common install directories (Windows)
-  const candidates = [
+  // Check common install directories
+  const candidates = isWin ? [
     'C:\\Program Files\\hamlib\\bin\\rigctld.exe',
     'C:\\Program Files (x86)\\hamlib\\bin\\rigctld.exe',
     'C:\\hamlib\\bin\\rigctld.exe',
+  ] : [
+    '/usr/bin/rigctld',
+    '/usr/local/bin/rigctld',
+    '/opt/homebrew/bin/rigctld',    // macOS Apple Silicon (Homebrew)
+    '/opt/local/bin/rigctld',       // macOS MacPorts
+    '/snap/bin/rigctld',
   ];
   for (const p of candidates) {
     try {
@@ -1052,6 +1070,25 @@ async function saveQsoRecord(qsoData) {
   if (settings.myCallsign && !qsoData.operator) {
     qsoData.operator = settings.myCallsign.toUpperCase();
   }
+
+  // Enrich COMMENT with park name + location for POTA/WWFF/LLOTA QSOs
+  const parkRef = qsoData.potaRef || qsoData.wwffRef || (qsoData.sig && qsoData.sigInfo ? qsoData.sigInfo : '');
+  if (parkRef) {
+    const park = getParkDb(parksMap, parkRef);
+    if (park && park.name) {
+      const parts = [
+        qsoData.sig || 'POTA',
+        parkRef,
+        park.locationDesc || '',
+        park.name || '',
+      ].filter(Boolean);
+      const parkTag = `[${parts.join(' ')}]`;
+      // Strip the auto-appended [SIG REF] tag from the base comment to avoid duplication
+      const userComment = (qsoData.comment || '').replace(/\s*\[.+?\]\s*$/, '').trim();
+      qsoData.comment = userComment ? `${userComment} ${parkTag}` : parkTag;
+    }
+  }
+
   const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
   appendQso(logPath, qsoData);
 
@@ -1186,7 +1223,7 @@ async function saveQsoRecord(qsoData) {
   // Auto-upload chaser QSO to SOTAdata if enabled
   if (settings.sotaUpload && qsoData.sig === 'SOTA' && qsoData.sigInfo && sotaUploader.configured) {
     try {
-      sendCatLog(`[SOTA] Uploading chase: ${qsoData.callsign} @ ${qsoData.sigInfo}`);
+      sendCatLog(`[SOTA] Uploading chase: ${qsoData.callsign} @ ${qsoData.sigInfo} RST S${qsoData.rstSent || '?'} R${qsoData.rstRcvd || '?'}`);
       const sotaResult = await sotaUploader.uploadChase(qsoData);
       if (sotaResult.success) {
         sendCatLog(`[SOTA] Chase uploaded successfully`);
@@ -1306,6 +1343,14 @@ function connectWsjtx() {
           if (i > 0) parkQso.skipLogbookForward = true; // only forward first record
           allQsoData.push(parkQso);
           await saveQsoRecord(parkQso);
+        }
+        // Cross-program references (WWFF, LLOTA for same park)
+        const crossRefs = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+        for (const xr of crossRefs) {
+          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: settings.grid || '', skipLogbookForward: true };
+          if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
+          allQsoData.push(xrQso);
+          await saveQsoRecord(xrQso);
         }
         // Notify renderer so activator view gets the contact
         if (win && !win.isDestroyed()) {
@@ -1782,6 +1827,7 @@ function needsSmartSdr() {
   // or CW XIT offset is configured (XIT is applied via SmartSDR slice commands)
   if (settings.smartSdrSpots) return true;
   if (settings.enableCwKeyer) return true;
+  if (settings.enableRemote && settings.remoteCwEnabled) return true;
   if (settings.enableWsjtx && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.enableRemote && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.cwXit && settings.catTarget && settings.catTarget.type === 'tcp') return true;
@@ -1803,7 +1849,7 @@ function connectSmartSdr() {
   }
   smartSdr.setPersistentId(settings.smartSdrClientId);
   // Tell SmartSDR whether CW keyer needs GUI auth
-  smartSdr.setNeedsCw(!!settings.enableCwKeyer);
+  smartSdr.setNeedsCw(!!(settings.enableCwKeyer || (settings.enableRemote && settings.remoteCwEnabled)));
   // Bind to GUI client for ECHOCAT rig controls (ATU, etc.)
   smartSdr.setNeedsBind(!!settings.enableRemote);
   // Log CW auth results
@@ -1883,6 +1929,94 @@ function disconnectTci() {
   }
 }
 
+// --- 4O3A Antenna Genius ---
+function connectAntennaGenius() {
+  disconnectAntennaGenius();
+  if (!settings.enableAntennaGenius || !settings.agHost) return;
+  agClient = new AntennaGeniusClient();
+  agLastBand = null;
+  sendCatLog(`[AG] Connecting to Antenna Genius at ${settings.agHost}:9007`);
+  agClient.on('connected', () => {
+    sendCatLog('[AG] Connected to Antenna Genius');
+    agClient.subscribePortStatus();
+    sendAgStatus();
+  });
+  agClient.on('disconnected', () => {
+    sendCatLog('[AG] Disconnected from Antenna Genius');
+    sendAgStatus();
+  });
+  agClient.on('port-status', (status) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('ag-port-status', status);
+    }
+  });
+  agClient.on('antenna-list', (names) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('ag-antenna-names', names);
+    }
+  });
+  agClient.on('error', (err) => {
+    sendCatLog(`[AG] Error: ${err.message}`);
+  });
+  agClient.on('reconnecting', () => {
+    sendCatLog(`[AG] Reconnecting to ${settings.agHost}:9007...`);
+  });
+  agClient.connect(settings.agHost, 9007);
+}
+
+function disconnectAntennaGenius() {
+  agLastBand = null;
+  if (agClient) {
+    agClient.removeAllListeners();
+    agClient.disconnect();
+    agClient = null;
+  }
+}
+
+function sendAgStatus() {
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('ag-status', {
+      connected: !!(agClient && agClient.connected),
+    });
+  }
+}
+
+/**
+ * Switch antenna based on frequency. Called from tuneRadio().
+ * @param {number} freqKhz - Frequency in kHz
+ */
+function agSwitchForFreq(freqKhz) {
+  if (!agClient || !agClient.connected) {
+    sendCatLog('[AG] Skip switch — not connected');
+    return;
+  }
+  if (!settings.agBandMap || typeof settings.agBandMap !== 'object') {
+    sendCatLog('[AG] Skip switch — no band map configured');
+    return;
+  }
+
+  const freqMhz = freqKhz / 1000;
+  const band = freqToBand(freqMhz);
+  if (!band) {
+    sendCatLog(`[AG] Skip switch — freq ${freqKhz} kHz not in any band`);
+    return;
+  }
+
+  // Don't re-send if already on this band
+  if (band === agLastBand) return;
+  agLastBand = band;
+
+  const antenna = settings.agBandMap[band];
+  if (!antenna) {
+    sendCatLog(`[AG] No antenna mapped for ${band}`);
+    return;
+  }
+
+  const radioPort = settings.agRadioPort || 1;
+  sendCatLog(`[AG] Band ${band} → antenna ${antenna} (port ${radioPort === 1 ? 'A' : 'B'})`);
+  agClient.selectAntenna(radioPort, antenna);
+}
+
 // --- ECHOCAT ---
 function pushActivatorStateToPhone() {
   if (!remoteServer || !remoteServer.hasClient()) return;
@@ -1910,7 +2044,52 @@ function updateRemoteSettings() {
     maxAgeMin: settings.maxAgeMin != null ? settings.maxAgeMin : 5,
     distUnit: settings.distUnit || 'mi',
     cwXit: settings.cwXit || 0,
+    remoteCwEnabled: !!settings.remoteCwEnabled,
+    remoteCwMacros: settings.remoteCwMacros || null,
   });
+}
+
+// --- CW Key Port (dedicated DTR keying via external USB-serial adapter) ---
+function connectCwKeyPort() {
+  disconnectCwKeyPort();
+  const portPath = settings.cwKeyPort;
+  if (!portPath) return;
+  const { SerialPort } = require('serialport');
+  const port = new SerialPort({
+    path: portPath,
+    baudRate: 38400, // CDC-ACM ignores baud, but match QMX default just in case
+    autoOpen: false,
+    rtscts: false,
+    hupcl: false,
+  });
+  cwKeyPort = port;
+  port.on('open', () => {
+    // Force DTR low initially (key up), RTS low too
+    port.set({ dtr: false, rts: false }, () => {});
+    console.log(`[CW Key Port] Opened ${portPath} for DTR keying`);
+  });
+  port.on('error', (err) => {
+    console.log(`[CW Key Port] Error: ${err.message}`);
+  });
+  port.on('close', () => {
+    console.log(`[CW Key Port] Closed ${portPath}`);
+    cwKeyPort = null;
+  });
+  port.open((err) => {
+    if (err) {
+      console.log(`[CW Key Port] Open failed: ${err.message}`);
+      cwKeyPort = null;
+    }
+  });
+}
+
+function disconnectCwKeyPort() {
+  if (cwKeyPort) {
+    // Force key up before closing
+    try { cwKeyPort.set({ dtr: false }, () => {}); } catch {}
+    if (cwKeyPort.isOpen) cwKeyPort.close();
+    cwKeyPort = null;
+  }
 }
 
 function connectRemote() {
@@ -1952,6 +2131,10 @@ function connectRemote() {
     if (workedQsos.size > 0) {
       remoteServer.sendWorkedQsos([...workedQsos.entries()]);
     }
+    // Restore saved ECHOCAT filters (bands, modes, regions, sort, etc.)
+    if (settings.echoFilters) {
+      remoteServer.sendFiltersToClient(settings.echoFilters);
+    }
     // Push settings needed by phone (callsign, grid, respot defaults, cluster state)
     updateRemoteSettings();
     if (win && !win.isDestroyed()) {
@@ -1963,6 +2146,14 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
     }
+    // CW safety: ensure PTT released on disconnect (keyer.stop() is handled in RemoteServer)
+    if (smartSdr && smartSdr.connected) {
+      smartSdr.cwPttRelease();
+    }
+    // Force CW key port DTR low (key up) on disconnect
+    if (cwKeyPort && cwKeyPort.isOpen) {
+      cwKeyPort.set({ dtr: false }, () => {});
+    }
     destroyRemoteAudioWindow();
     // Safety: disable JTCAT TX if phone was driving a QSO
     if (ft8Engine && remoteJtcatQso) {
@@ -1973,6 +2164,76 @@ function connectRemote() {
     }
     remoteJtcatQso = null;
   });
+
+  // CW keyer output: route IambicKeyer key events to radio
+  remoteServer.setCwKeyerOutput(({ down }) => {
+    // FlexRadio via SmartSDR TCP API — cw key 0|1 with client_handle
+    if (smartSdr && smartSdr.connected) {
+      if (down) {
+        smartSdr.cwPttOn(); // activate CW PTT (with holdoff auto-release)
+      }
+      smartSdr.cwKey(down);
+    }
+    // Dedicated CW Key Port — DTR keying via external USB-serial adapter
+    if (cwKeyPort && cwKeyPort.isOpen) {
+      cwKeyPort.set({ dtr: !!down }, (err) => {
+        if (err) console.log(`[CW Key Port] DTR error: ${err.message}`);
+      });
+    }
+  });
+
+  // CW config changes from phone (WPM)
+  remoteServer.on('cw-config', ({ wpm }) => {
+    if (smartSdr && smartSdr.connected) {
+      smartSdr.setCwSpeed(wpm);
+    }
+    // Also set KS on serial CAT (QMX etc.)
+    if (cat && cat.connected) {
+      cat.setCwSpeed(wpm);
+    }
+  });
+
+  // CW text macros/freeform from phone — route to radio
+  remoteServer.on('cw-text', ({ text }) => {
+    if (!text) return;
+    // Substitute {MYCALL} with the user's callsign
+    const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '');
+    console.log(`[Echo CAT] CW text: ${expanded}`);
+    // Serial CAT (QMX/QDX/Kenwood): use KY command
+    if (cat && cat.connected) {
+      cat.sendCwText(expanded);
+    }
+    // SmartSDR: use cw send command (Flex supports text sending too)
+    // Note: SmartSDR's `cw send` is character-level like KY
+    // For now, route through CAT. If no CAT but SmartSDR, we could add
+    // smartSdr.sendCwText() in the future.
+  });
+
+  // Phone requests to toggle remote CW on/off
+  remoteServer.on('cw-enable-request', ({ enabled }) => {
+    settings.remoteCwEnabled = !!enabled;
+    saveSettings(settings);
+    remoteServer.setCwEnabled(!!enabled);
+    if (enabled && smartSdr) {
+      smartSdr.setNeedsCw(true);
+    }
+    // Notify desktop UI
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('settings-changed', { remoteCwEnabled: !!enabled });
+    }
+    console.log(`[Echo CAT] Remote CW ${enabled ? 'enabled' : 'disabled'} by phone`);
+  });
+
+  // Enable remote CW if setting is on
+  if (settings.remoteCwEnabled) {
+    remoteServer.setCwEnabled(true);
+    if (smartSdr) smartSdr.setNeedsCw(true);
+  }
+
+  // Open dedicated CW Key Port if configured
+  if (settings.cwKeyPort) {
+    connectCwKeyPort();
+  }
 
   remoteServer.on('set-sources', (sources) => {
     if (!sources) return;
@@ -1997,6 +2258,12 @@ function connectRemote() {
     console.log('[Echo CAT] Sources updated:', newSettings);
   });
 
+  remoteServer.on('set-echo-filters', (filters) => {
+    if (!filters) return;
+    settings.echoFilters = filters;
+    saveSettings(settings);
+  });
+
   remoteServer.on('switch-rig', ({ rigId }) => {
     const rig = (settings.rigs || []).find(r => r.id === rigId);
     if (!rig) return;
@@ -2015,6 +2282,8 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('reload-prefs');
     }
+    // Track active rig for club schedule advisory
+    if (remoteServer._clubMode) remoteServer._activeRigId = rig.id;
     // Confirm back to phone
     const rigs = (settings.rigs || []).map(r => ({ id: r.id, name: r.name }));
     remoteServer.sendRigsToClient(rigs, rig.id);
@@ -2179,6 +2448,10 @@ function connectRemote() {
 
   remoteServer.on('set-mode', ({ mode }) => {
     if (!mode) return;
+    if (!_currentFreqHz) {
+      console.log('[Echo CAT] Set mode ignored — no frequency from radio yet');
+      return;
+    }
     console.log('[Echo CAT] Set mode →', mode);
     // Reset rate limiter so mode-only change goes through
     _lastTuneFreq = 0;
@@ -2398,6 +2671,13 @@ function connectRemote() {
       if (settings.myCallsign) {
         qsoData.stationCallsign = settings.myCallsign.toUpperCase();
       }
+      // Club mode: OPERATOR = individual member callsign
+      if (settings.clubMode && remoteServer) {
+        const member = remoteServer.getAuthenticatedMember();
+        if (member) {
+          qsoData.operator = member.callsign;
+        }
+      }
       if (settings.txPower) {
         qsoData.txPower = String(settings.txPower);
       }
@@ -2426,6 +2706,13 @@ function connectRemote() {
           const r = await saveQsoRecord(qsoData);
           if (r) Object.assign(result, r);
         }
+        // Cross-program references (WWFF, LLOTA for same park)
+        const crossRefs1 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+        for (const xr of crossRefs1) {
+          const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
+          if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
+          await saveQsoRecord(xrQso);
+        }
       } else if (settings.appMode === 'activator') {
         // Desktop is in activator mode but phone didn't send mySig — use desktop park refs
         const parkRefs = (settings.activatorParkRefs || []).filter(p => p && p.ref);
@@ -2435,6 +2722,13 @@ function connectRemote() {
             if (i > 0) parkQso.skipLogbookForward = true;
             const r = await saveQsoRecord(parkQso);
             if (r) Object.assign(result, r);
+          }
+          // Cross-program references (WWFF, LLOTA for same park)
+          const crossRefs2 = (settings.activatorCrossRefs || []).filter(xr => xr && xr.ref);
+          for (const xr of crossRefs2) {
+            const xrQso = { ...qsoData, mySig: xr.program.toUpperCase(), mySigInfo: xr.ref, myGridsquare: myGrid, skipLogbookForward: true };
+            if (xr.program === 'WWFF') xrQso.myWwffRef = xr.ref;
+            await saveQsoRecord(xrQso);
           }
         } else {
           const r = await saveQsoRecord(qsoData);
@@ -2655,8 +2949,16 @@ function connectRemote() {
     settings.remoteToken = token;
     saveSettings(settings);
   }
+  // Club Station Mode
+  if (settings.clubMode && settings.clubCsvPath) {
+    const auditPath = settings.clubAuditPath ||
+      path.join(app.getPath('userData'), 'club-audit.csv');
+    const auditLogger = createAuditLogger(auditPath);
+    remoteServer.setClubMode(true, settings.clubCsvPath, auditLogger, settings.rigs || [], settings.activeRigId);
+  }
+
   remoteServer.start(port, token, {
-    requireToken,
+    requireToken: settings.clubMode ? true : requireToken, // club mode always requires auth
     pttSafetyTimeout: settings.remotePttTimeout || 180,
     rendererPath: path.join(app.getAppPath(), 'renderer'),
     certDir: app.getPath('userData'),
@@ -2664,6 +2966,7 @@ function connectRemote() {
 }
 
 function disconnectRemote() {
+  disconnectCwKeyPort();
   if (remoteServer) {
     remoteServer.removeAllListeners();
     remoteServer.stop();
@@ -2718,7 +3021,21 @@ function broadcastRemoteRadioStatus() {
 }
 
 // --- Remote Audio (hidden BrowserWindow for WebRTC) ---
-function startRemoteAudio() {
+async function startRemoteAudio() {
+  // On macOS, request microphone permission before creating the audio window.
+  // Without this, getUserMedia() silently returns an empty/silent stream.
+  if (process.platform === 'darwin') {
+    const { systemPreferences } = require('electron');
+    const micStatus = systemPreferences.getMediaAccessStatus('microphone');
+    if (micStatus !== 'granted') {
+      const granted = await systemPreferences.askForMediaAccess('microphone');
+      if (!granted) {
+        console.error('[Echo CAT] Microphone permission denied by macOS');
+        return;
+      }
+    }
+  }
+
   // If window already exists, tell it to restart a fresh WebRTC session
   if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
     remoteAudioWin.webContents.send('remote-audio-start', {
@@ -2739,6 +3056,9 @@ function startRemoteAudio() {
     },
   });
 
+  // Grant media permissions to the audio window's session
+  remoteAudioWin.webContents.session.setPermissionRequestHandler((_wc, perm, cb) => cb(true));
+
   remoteAudioWin.loadFile(path.join(__dirname, 'renderer', 'remote-audio.html'));
 
   remoteAudioWin.webContents.on('did-finish-load', () => {
@@ -2757,10 +3077,8 @@ function startRemoteAudio() {
 
 function destroyRemoteAudioWindow() {
   if (remoteAudioWin && !remoteAudioWin.isDestroyed()) {
-    remoteAudioWin.webContents.send('remote-audio-stop');
-    setTimeout(() => {
-      if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.close();
-    }, 500);
+    try { remoteAudioWin.webContents.send('remote-audio-stop'); } catch { /* may be destroyed */ }
+    try { remoteAudioWin.close(); } catch { /* ignore */ }
   }
 }
 
@@ -2937,7 +3255,11 @@ async function processSotaSpots(raw) {
   // Batch-fetch summit coordinates (cached across refreshes)
   await fetchSummitCoordsBatch(raw);
 
-  const all = raw.map((s) => {
+  const all = raw.filter((s) => {
+    // Skip spots with no frequency (pre-announced activations with no QRG)
+    const f = parseFloat(s.frequency);
+    return !isNaN(f) && f > 0;
+  }).map((s) => {
     const freqMHz = parseFloat(s.frequency);
     const freqKHz = Math.round(freqMHz * 1000); // SOTA gives MHz → convert to kHz
     const assoc = s.associationCode || '';
@@ -3218,20 +3540,15 @@ function sendMergedSpots() {
   const netSpots = getActiveNetSpots();
   const merged = [...netSpots, ...lastPotaSotaSpots, ...clusterSpots, ...rbnWatchSpots, ...pskrSpots];
   win.webContents.send('spots', merged);
-  // Filter net spots out of panadapter pushes (no lat/lon, not real signals)
-  const realSpots = merged.filter(s => s.source !== 'net');
-  pushSpotsToSmartSdr(realSpots);
-  pushSpotsToTci(realSpots);
-  // Forward to ECHOCAT — SSB only (net spots always pass), respect max spot age
+  pushSpotsToSmartSdr(merged);
+  pushSpotsToTci(merged);
+  // Forward to ECHOCAT — all modes (phone-side Mode dropdown handles filtering), respect max spot age
   if (remoteServer && remoteServer.running) {
     const maxAgeMs = ((settings.maxAgeMin != null ? settings.maxAgeMin : 5) * 60000) || 300000;
     const now = Date.now();
     const echoSpots = merged.filter(s => {
       // Net spots always pass through to ECHOCAT
       if (s.source === 'net') return true;
-      // SSB only
-      const m = (s.mode || '').toUpperCase();
-      if (m !== 'SSB' && m !== 'USB' && m !== 'LSB') return false;
       // Age filter
       if (s.spotTime) {
         const t = s.spotTime.endsWith('Z') ? s.spotTime : s.spotTime + 'Z';
@@ -3464,13 +3781,13 @@ const hamrsBridge = {
   socket: null,
   heartbeatTimer: null,
   host: '127.0.0.1',
-  port: 2333,
+  port: 2237,
   id: 'POTACAT',
 
   start(host, port) {
     this.stop();
     this.host = host || '127.0.0.1';
-    this.port = port || 2333;
+    this.port = port || 2237;
     const dgram = require('dgram');
     this.socket = dgram.createSocket('udp4');
     this.socket.on('error', (err) => {
@@ -3508,10 +3825,23 @@ const hamrsBridge = {
       const freqHz = Math.round((parseFloat(qsoData.frequency) || 0) * 1000);
       sendCatLog(`[HamRS] Sending QSO: ${qsoData.callsign} ${freqHz}Hz ${qsoData.mode} → ${this.host}:${this.port}`);
 
+      // Build proper Date objects from qsoData date/time fields
+      let dateTimeOff;
+      if (qsoData.qsoDate) {
+        const d = qsoData.qsoDate; // YYYYMMDD
+        const t = qsoData.timeOn || '0000'; // HHMM or HHMMSS
+        dateTimeOff = new Date(Date.UTC(
+          parseInt(d.slice(0, 4), 10), parseInt(d.slice(4, 6), 10) - 1, parseInt(d.slice(6, 8), 10),
+          parseInt(t.slice(0, 2), 10), parseInt(t.slice(2, 4), 10), t.length >= 6 ? parseInt(t.slice(4, 6), 10) : 0
+        ));
+      }
+
       // Send QSO_LOGGED (type 5) — the primary message most apps listen for
       const qsoMsg = encodeQsoLogged(this.id, {
+        dateTimeOff,
+        dateTimeOn: dateTimeOff,
         dxCall: qsoData.callsign || '',
-        dxGrid: qsoData.grid || '',
+        dxGrid: qsoData.gridsquare || '',
         txFrequency: freqHz,
         mode: qsoData.mode || '',
         reportSent: qsoData.rstSent || '59',
@@ -3544,6 +3874,44 @@ const hamrsBridge = {
 };
 
 // --- Logbook forwarding ---
+
+/**
+ * Convert raw ADIF fields (uppercase keys from parseAllRawQsos) to the
+ * qsoData format that buildAdifRecord() / forwardToLogbook() expect.
+ */
+function rawQsoToQsoData(raw) {
+  const freqMhz = parseFloat(raw.FREQ || '0');
+  return {
+    callsign: raw.CALL || '',
+    frequency: (freqMhz * 1000).toFixed(1), // MHz → kHz
+    mode: raw.MODE || '',
+    qsoDate: raw.QSO_DATE || '',
+    timeOn: raw.TIME_ON || '',
+    rstSent: raw.RST_SENT || '',
+    rstRcvd: raw.RST_RCVD || '',
+    txPower: raw.TX_PWR || '',
+    band: raw.BAND || '',
+    sig: raw.SIG || '',
+    sigInfo: raw.SIG_INFO || '',
+    potaRef: raw.POTA_REF || '',
+    sotaRef: raw.SOTA_REF || '',
+    wwffRef: raw.WWFF_REF || '',
+    operator: raw.OPERATOR || '',
+    name: raw.NAME || '',
+    state: raw.STATE || '',
+    county: raw.CNTY || '',
+    gridsquare: raw.GRIDSQUARE || '',
+    country: raw.COUNTRY || '',
+    comment: raw.COMMENT || '',
+    mySig: raw.MY_SIG || '',
+    mySigInfo: raw.MY_SIG_INFO || '',
+    myPotaRef: raw.MY_POTA_REF || '',
+    mySotaRef: raw.MY_SOTA_REF || '',
+    myGridsquare: raw.MY_GRIDSQUARE || '',
+    stationCallsign: raw.STATION_CALLSIGN || '',
+  };
+}
+
 function forwardToLogbook(qsoData) {
   const type = settings.logbookType;
   const host = settings.logbookHost || '127.0.0.1';
@@ -3556,7 +3924,7 @@ function forwardToLogbook(qsoData) {
     const record = buildAdifRecord(qsoData);
     const adifText = `<adif_ver:5>3.1.4\n<programid:7>POTACAT\n<EOH>\n${record}\n`;
     // Start bridge if not running (or if host/port changed)
-    const hp = port || 2333;
+    const hp = port || 2237;
     if (!hamrsBridge.socket || hamrsBridge.host !== host || hamrsBridge.port !== hp) {
       hamrsBridge.start(host, hp);
     }
@@ -3564,6 +3932,9 @@ function forwardToLogbook(qsoData) {
   }
   if (type === 'hrd') {
     return sendUdpAdif(qsoData, host, port || 2333);
+  }
+  if (type === 'macloggerdx') {
+    return sendUdpAdif(qsoData, host, port || 9090);
   }
   if (type === 'n3fjp') {
     return sendN3fjpTcp(qsoData, host, port || 1100);
@@ -3579,7 +3950,7 @@ function forwardToLogbook(qsoData) {
 
 /**
  * Send a QSO via plain UDP ADIF packet.
- * Used by Log4OM 2 (port 2237) and HRD Logbook (port 2333).
+ * Used by Log4OM 2 (port 2237), HRD Logbook (port 2333), and MacLoggerDX (port 9090).
  */
 function sendUdpAdif(qsoData, host, port) {
   return new Promise((resolve, reject) => {
@@ -3730,6 +4101,8 @@ function sendWavelogHttp(qsoData) {
 async function sendToQrzLogbook(qsoData) {
   const apiKey = settings.qrzApiKey;
   if (!apiKey) throw new Error('QRZ API key not configured');
+
+  // Comment already enriched with park name in saveQsoRecord()
   const record = buildAdifRecord(qsoData);
   await QrzClient.uploadQso(apiKey, record, settings.myCallsign || '');
 }
@@ -3817,6 +4190,8 @@ function createWindow() {
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.close();
     if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) spotsPopoutWin.close();
     if (clusterPopoutWin && !clusterPopoutWin.isDestroyed()) clusterPopoutWin.close();
+    if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) actmapPopoutWin.close();
+    if (remoteAudioWin && !remoteAudioWin.isDestroyed()) remoteAudioWin.close();
   });
 
   // Once the renderer is actually ready to listen, send current state
@@ -3862,6 +4237,15 @@ function createWindow() {
     // Push cached events to renderer immediately + scan log for matches
     pushEventsToRenderer();
     scanLogForEvents();
+    // Load directory cache and fetch fresh data (only if enabled)
+    if (settings.enableDirectory) {
+      const dirCache = loadDirectoryCache();
+      directoryNets = dirCache.nets || [];
+      directorySwl = dirCache.swl || [];
+      pushDirectoryToRenderer();
+      fetchDirectory();
+    }
+    setInterval(() => { if (settings.enableDirectory) fetchDirectory(); }, 4 * 3600000);
     // Auto-reopen pop-out map if it was open when the app last closed
     if (settings.mapPopoutOpen) {
       ipcMain.emit('popout-map-open');
@@ -4106,6 +4490,32 @@ function pushEventsToRenderer() {
     progress: (eventStates[ev.id] && eventStates[ev.id].progress) || {},
   }));
   win.webContents.send('active-events', payload);
+}
+
+// --- Directory (HF Nets & SWL Broadcasts from Google Sheet) ---
+
+function loadDirectoryCache() {
+  try {
+    return JSON.parse(fs.readFileSync(DIRECTORY_CACHE_PATH, 'utf-8'));
+  } catch { /* fall through */ }
+  return { nets: [], swl: [], timestamp: 0 };
+}
+
+function saveDirectoryCache(data) {
+  try { fs.writeFileSync(DIRECTORY_CACHE_PATH, JSON.stringify(data)); } catch { /* ignore */ }
+}
+
+async function fetchDirectory() {
+  const results = await Promise.allSettled([fetchDirectoryNets(), fetchDirectorySwl()]);
+  if (results[0].status === 'fulfilled') directoryNets = results[0].value;
+  if (results[1].status === 'fulfilled') directorySwl = results[1].value;
+  saveDirectoryCache({ nets: directoryNets, swl: directorySwl, timestamp: Date.now() });
+  pushDirectoryToRenderer();
+}
+
+function pushDirectoryToRenderer() {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send('directory-data', { nets: directoryNets, swl: directorySwl });
 }
 
 function getEventProgress(eventId) {
@@ -4605,6 +5015,7 @@ function migrateRigSettings(s) {
 // --- Tune radio (shared by IPC and protocol handler) ---
 let _lastTuneFreq = 0;
 let _lastTuneTime = 0;
+let _lastTuneBand = null; // for ATU auto-tune on band change
 
 function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
   let freqHz = Math.round(parseFloat(freqKhz) * 1000); // kHz → Hz
@@ -4624,7 +5035,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     filterWidth = settings.cwFilterWidth || 0;
   } else if (m === 'SSB' || m === 'USB' || m === 'LSB') {
     filterWidth = settings.ssbFilterWidth || 0;
-  } else if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL') {
+  } else if (m === 'FT8' || m === 'FT4' || m === 'FT2' || m === 'DIGU' || m === 'DIGL' || m === 'PKTUSB' || m === 'PKTLSB') {
     filterWidth = settings.digitalFilterWidth || 0;
   }
 
@@ -4632,12 +5043,18 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     sendRotorBearing(Math.round(brng));
   }
 
+  // Antenna Genius: switch antenna based on band
+  if (settings.enableAntennaGenius) {
+    agSwitchForFreq(freqKhz);
+  }
+
   if (settings.enableWsjtx && (!cat || !cat.connected)) {
     if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
       const sliceIndex = (settings.catTarget.port || 5002) - 5002;
       const freqMhz = freqHz / 1e6;
-      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR')
-        ? 'DIGU' : (mode === 'CW' ? 'CW' : (mode === 'SSB' || mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null)));
+      const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB')
+        ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
+        : (mode === 'CW' ? 'CW' : (mode === 'SSB' || mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null)));
       sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}→${flexMode} filter=${filterWidth}`);
       smartSdr.tuneSlice(sliceIndex, freqMhz, flexMode, filterWidth);
       // Set or clear XIT on the slice
@@ -4645,6 +5062,20 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
         smartSdr.setSliceXit(sliceIndex, true, settings.cwXit);
       } else if (shouldClearXit) {
         smartSdr.setSliceXit(sliceIndex, false);
+      }
+      // ATU: auto-tune on band change (SmartSDR-only path)
+      if (settings.enableAtu) {
+        const freqMhzSdr = freqHz / 1e6;
+        const tuneBandSdr = freqToBand(freqMhzSdr);
+        if (tuneBandSdr && tuneBandSdr !== _lastTuneBand) {
+          _lastTuneBand = tuneBandSdr;
+          setTimeout(() => {
+            sendCatLog(`[ATU] Band changed to ${tuneBandSdr} → starting SmartSDR ATU tune`);
+            smartSdr.setAtu(true);
+          }, 1500);
+        } else if (!_lastTuneBand && tuneBandSdr) {
+          _lastTuneBand = tuneBandSdr;
+        }
       }
     }
     return;
@@ -4669,6 +5100,28 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       smartSdr.setSliceXit(sliceIndex, true, settings.cwXit);
     } else if (shouldClearXit) {
       smartSdr.setSliceXit(sliceIndex, false);
+    }
+  }
+
+  // ATU: auto-tune on band change
+  if (settings.enableAtu) {
+    const freqMhz = freqKhz / 1000;
+    const tuneBand = freqToBand(freqMhz);
+    if (tuneBand && tuneBand !== _lastTuneBand) {
+      _lastTuneBand = tuneBand;
+      // Delay ATU trigger to let the radio settle on the new frequency first
+      setTimeout(() => {
+        if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
+          sendCatLog(`[ATU] Band changed to ${tuneBand} → starting SmartSDR ATU tune`);
+          smartSdr.setAtu(true);
+        } else if (cat && cat.connected) {
+          sendCatLog(`[ATU] Band changed to ${tuneBand} → starting ATU tune`);
+          cat.startTune();
+        }
+      }, 1500);
+    } else if (!_lastTuneBand && tuneBand) {
+      // First tune — just record the band, don't trigger ATU
+      _lastTuneBand = tuneBand;
     }
   }
 }
@@ -4718,6 +5171,16 @@ app.on('open-url', (event, url) => {
 });
 
 app.whenReady().then(() => {
+  // Add Referer header for OpenStreetMap tile requests (required by OSM usage policy)
+  const { session } = require('electron');
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://*.tile.openstreetmap.org/*'] },
+    (details, callback) => {
+      details.requestHeaders['Referer'] = 'https://potacat.com';
+      callback({ requestHeaders: details.requestHeaders });
+    }
+  );
+
   Menu.setApplicationMenu(null);
   settings = loadSettings();
   migrateRigSettings(settings);
@@ -4742,12 +5205,13 @@ app.whenReady().then(() => {
   if (settings.enableRbn) connectRbn();
   connectSmartSdr(); // connects if smartSdrSpots, CW keyer, or WSJT-X+Flex
   connectTci();
+  connectAntennaGenius();
   if (settings.enableRemote) connectRemote();
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr) connectPskr();
   if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
-    hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2333);
+    hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
   }
 
   // Cold start: check if app was launched via potacat:// URL
@@ -4876,6 +5340,13 @@ app.whenReady().then(() => {
     if (qsoPopoutWin && !qsoPopoutWin.isDestroyed()) qsoPopoutWin.webContents.send('colorblind-mode', enabled);
     if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) actmapPopoutWin.webContents.send('colorblind-mode', enabled);
     if (remoteServer) remoteServer.setColorblindMode(enabled);
+  });
+
+  // Relay WCAG mode to pop-outs
+  ipcMain.on('wcag-mode', (_e, enabled) => {
+    if (popoutWin && !popoutWin.isDestroyed()) popoutWin.webContents.send('wcag-mode', enabled);
+    if (spotsPopoutWin && !spotsPopoutWin.isDestroyed()) spotsPopoutWin.webContents.send('wcag-mode', enabled);
+    if (actmapPopoutWin && !actmapPopoutWin.isDestroyed()) actmapPopoutWin.webContents.send('wcag-mode', enabled);
   });
 
   // Relay theme changes to pop-out
@@ -5510,7 +5981,7 @@ app.whenReady().then(() => {
       return;
     }
     // Only allow known URLs
-    if (url.startsWith('https://www.qrz.com/') || url.startsWith('https://caseystanton.com/') || url.startsWith('https://github.com/Waffleslop/POTACAT/') || url.startsWith('https://hamlib.github.io/') || url.startsWith('https://github.com/Hamlib/') || url.startsWith('https://discord.gg/') || url.startsWith('https://potacat.com/') || url.startsWith('https://buymeacoffee.com/potacat')) {
+    if (url.startsWith('https://www.qrz.com/') || url.startsWith('https://caseystanton.com/') || url.startsWith('https://github.com/Waffleslop/POTACAT/') || url.startsWith('https://hamlib.github.io/') || url.startsWith('https://github.com/Hamlib/') || url.startsWith('https://discord.gg/') || url.startsWith('https://potacat.com/') || url.startsWith('https://buymeacoffee.com/potacat') || url.startsWith('https://docs.google.com/spreadsheets/')) {
       shell.openExternal(url);
     }
   });
@@ -5554,6 +6025,10 @@ app.whenReady().then(() => {
       console.error('[Echo CAT Audio] Error:', status.error);
     }
   });
+
+  // --- Directory IPC ---
+  ipcMain.on('fetch-directory', () => { fetchDirectory(); });
+  ipcMain.handle('get-directory', () => ({ nets: directoryNets, swl: directorySwl }));
 
   // --- Events IPC ---
   ipcMain.handle('get-active-events', () => {
@@ -5676,6 +6151,9 @@ app.whenReady().then(() => {
       (has('tciHost') && newSettings.tciHost !== settings.tciHost) ||
       (has('tciPort') && newSettings.tciPort !== settings.tciPort);
 
+    const agChanged = (has('enableAntennaGenius') && newSettings.enableAntennaGenius !== settings.enableAntennaGenius) ||
+      (has('agHost') && newSettings.agHost !== settings.agHost);
+
     const wsjtxChanged = (has('enableWsjtx') && newSettings.enableWsjtx !== settings.enableWsjtx) ||
       (has('wsjtxPort') && newSettings.wsjtxPort !== settings.wsjtxPort);
 
@@ -5684,7 +6162,11 @@ app.whenReady().then(() => {
     const remoteChanged = (has('enableRemote') && newSettings.enableRemote !== settings.enableRemote) ||
       (has('remotePort') && newSettings.remotePort !== settings.remotePort) ||
       (has('remoteToken') && newSettings.remoteToken !== settings.remoteToken) ||
-      (has('remoteRequireToken') && newSettings.remoteRequireToken !== settings.remoteRequireToken);
+      (has('remoteRequireToken') && newSettings.remoteRequireToken !== settings.remoteRequireToken) ||
+      (has('clubMode') && newSettings.clubMode !== settings.clubMode) ||
+      (has('clubCsvPath') && newSettings.clubCsvPath !== settings.clubCsvPath) ||
+      (has('remoteCwEnabled') && newSettings.remoteCwEnabled !== settings.remoteCwEnabled) ||
+      (has('cwKeyPort') && newSettings.cwKeyPort !== settings.cwKeyPort);
 
     const iconChanged = has('lightIcon') && newSettings.lightIcon !== settings.lightIcon;
 
@@ -5729,13 +6211,18 @@ app.whenReady().then(() => {
     }
 
     // Reconnect SmartSDR if settings changed (also needed for WSJT-X+Flex and CW keyer)
-    if (smartSdrChanged || wsjtxChanged || cwKeyerChanged) {
+    if (smartSdrChanged || wsjtxChanged || cwKeyerChanged || remoteChanged) {
       connectSmartSdr(); // needsSmartSdr() decides whether to actually connect
     }
 
     // Reconnect TCI if settings changed
     if (tciChanged) {
       connectTci();
+    }
+
+    // Reconnect Antenna Genius if settings changed
+    if (agChanged) {
+      connectAntennaGenius();
     }
 
     // Reconnect ECHOCAT if settings changed
@@ -5788,7 +6275,7 @@ app.whenReady().then(() => {
 
     // Start/stop HamRS bridge (WSJT-X binary heartbeats)
     if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
-      const hp = parseInt(settings.logbookPort, 10) || 2233;
+      const hp = parseInt(settings.logbookPort, 10) || 2237;
       const hh = settings.logbookHost || '127.0.0.1';
       if (!hamrsBridge.socket || hamrsBridge.host !== hh || hamrsBridge.port !== hp) {
         hamrsBridge.start(hh, hp);
@@ -5921,6 +6408,57 @@ app.whenReady().then(() => {
     return path.join(app.getPath('userData'), 'potacat_qso_log.adi');
   });
 
+  // --- Club Station Mode IPC ---
+  ipcMain.handle('choose-club-csv-file', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Choose Club Users CSV',
+      filters: [
+        { name: 'CSV Files', extensions: ['csv'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('preview-club-csv', async (_e, csvPath) => {
+    if (!csvPath) return { members: [], radioColumns: [], errors: ['No file path'] };
+    return loadClubUsers(csvPath);
+  });
+
+  ipcMain.handle('hash-club-passwords', async (_e, csvPath) => {
+    if (!csvPath) return { hashed: 0, alreadyHashed: 0, error: 'No file path' };
+    return hashPasswords(csvPath);
+  });
+
+  ipcMain.handle('create-club-csv', async (_e, rigNames) => {
+    // Default to same directory as the logbook file
+    const logPath = settings.adifLogPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
+    const logDir = path.dirname(logPath);
+    const defaultPath = path.join(logDir, 'club_users.csv');
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Create Club Users CSV',
+      defaultPath,
+      filters: [
+        { name: 'CSV Files', extensions: ['csv'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled) return null;
+    // Build header with fixed columns + rig names + schedule
+    const fixed = ['firstname', 'lastname', 'callsign', 'passwd', 'license', 'admin', 'user'];
+    const header = fixed.concat(rigNames || []).concat(['schedule']).join(',');
+    // Write header + one example row
+    const rigXs = (rigNames || []).map(() => 'x').join(',');
+    const exampleSched = rigNames && rigNames.length > 0
+      ? '"Mon 19:00-21:00 ' + rigNames[0] + '"'
+      : '""';
+    const example = 'Jane,Doe,W1AW,changeme,Extra,x,,' + rigXs + ',' + exampleSched;
+    fs.writeFileSync(result.filePath, header + '\n' + example + '\n');
+    return result.filePath;
+  });
+
   ipcMain.handle('choose-log-file', async (_e, currentPath) => {
     const defaultPath = currentPath || path.join(app.getPath('userData'), 'potacat_qso_log.adi');
     const result = await dialog.showSaveDialog(win, {
@@ -5961,6 +6499,23 @@ app.whenReady().then(() => {
     } catch (err) {
       return { success: false, error: err.message };
     }
+  });
+
+  ipcMain.handle('resend-qsos-to-logbook', async (_e, rawQsos) => {
+    if (!settings.logbookType) return { success: false, error: 'No logbook configured' };
+    let sent = 0;
+    for (const raw of rawQsos) {
+      try {
+        const qsoData = rawQsoToQsoData(raw);
+        await forwardToLogbook(qsoData);
+        sent++;
+        // Small delay between sends to avoid flooding
+        if (rawQsos.length > 1) await new Promise(r => setTimeout(r, 150));
+      } catch (err) {
+        console.error('Resend QSO failed:', err.message);
+      }
+    }
+    return { success: true, sent, total: rawQsos.length };
   });
 
   ipcMain.handle('test-serial-cat', async (_e, config) => {
@@ -6679,6 +7234,7 @@ function gracefulCleanup() {
   try { disconnectWsjtx(); } catch {}
   try { disconnectSmartSdr(); } catch {}
   try { disconnectTci(); } catch {}
+  try { disconnectAntennaGenius(); } catch {}
   try { disconnectRemote(); } catch {}
   try { disconnectKeyer(); } catch {}
   try { stopJtcat(); } catch {}
@@ -6690,10 +7246,10 @@ app.on('before-quit', gracefulCleanup);
 process.on('SIGINT', () => { gracefulCleanup(); process.exit(0); });
 process.on('SIGTERM', () => { gracefulCleanup(); process.exit(0); });
 
-app.on('window-all-closed', async () => {
-  // Send session duration telemetry before quitting — await so the request flushes
+app.on('window-all-closed', () => {
+  // Fire-and-forget telemetry — don't await; delaying app.quit() causes SIGABRT on macOS
   const sessionSeconds = Math.round((Date.now() - sessionStartTime) / 1000);
-  await sendTelemetry(sessionSeconds);
+  sendTelemetry(sessionSeconds);
 
   gracefulCleanup();
   app.quit();
