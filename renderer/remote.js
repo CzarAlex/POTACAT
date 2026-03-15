@@ -75,6 +75,17 @@
   const filterToolbar = document.getElementById('filter-toolbar');
   const sortSelect = document.getElementById('sort-select');
   const spotMapEl = document.getElementById('spot-map');
+  const dialPad = document.getElementById('dial-pad');
+  const dialPadBackdrop = document.getElementById('dial-pad-backdrop');
+  const dpFreq = document.getElementById('dp-freq');
+  const dpGo = document.getElementById('dp-go');
+  const dpCancel = document.getElementById('dp-cancel');
+  const dpClear = document.getElementById('dp-clear');
+  const dpStepUp = document.getElementById('dp-step-up');
+  const dpStepDown = document.getElementById('dp-step-down');
+  const dpStepSize = document.getElementById('dp-step-size');
+  const freqUpBtn = document.getElementById('freq-up-btn');
+  const freqDownBtn = document.getElementById('freq-down-btn');
   let spotSort = 'age';
   let spotMap = null;
   let spotMapLayer = null;
@@ -179,6 +190,7 @@
   const logFooterQueued = document.getElementById('log-footer-queued');
   const exportAdifBtn = document.getElementById('export-adif-btn');
   const bandFilterEl = document.getElementById('rc-band-filter');
+  const modeFilterEl = document.getElementById('rc-mode-filter');
   const regionFilterEl = document.getElementById('rc-region-filter');
   const spotsDropdown = document.getElementById('rc-spots-dropdown');
   const rcNewOnly = document.getElementById('rc-new-only');
@@ -416,6 +428,9 @@
           filterToolbar.classList.remove('hidden');
         }
         if (msg.colorblindMode) applyRemoteColorblind(true);
+        // CW keyer availability
+        cwAvailable = !!msg.cwAvailable;
+        cwPanel.classList.toggle('hidden', !cwAvailable);
         if (msg.settings) {
           myCallsign = msg.settings.myCallsign || '';
           phoneGrid = msg.settings.grid || phoneGrid;
@@ -434,7 +449,9 @@
           soMaxageVal.textContent = maxAgeMin + 'm';
           soDistMi.classList.toggle('active', distUnit === 'mi');
           soDistKm.classList.toggle('active', distUnit === 'km');
+          if (msg.settings.remoteCwMacros) syncMacrosFromSettings(msg.settings.remoteCwMacros);
         }
+        updateCwEnableBtn();
         break;
 
       case 'tune-blocked':
@@ -491,6 +508,27 @@
         connectError.classList.remove('hidden');
         connectBtn.textContent = 'Connect';
         connectBtn.disabled = false;
+        break;
+
+      case 'cw-available':
+        cwAvailable = !!msg.enabled;
+        cwPanel.classList.toggle('hidden', !cwAvailable);
+        updateCwEnableBtn();
+        break;
+
+      case 'cw-state':
+        cwIndicator.classList.toggle('active', !!msg.keying);
+        handleCwSidetone(!!msg.keying);
+        break;
+
+      case 'cw-config-ack':
+        if (msg.wpm) { cwWpm = msg.wpm; cwWpmLabel.textContent = cwWpm + ' WPM'; }
+        if (msg.mode) {
+          cwMode = msg.mode;
+          cwModeB.classList.toggle('active', cwMode === 'iambicB');
+          cwModeA.classList.toggle('active', cwMode === 'iambicA');
+          cwModeStr.classList.toggle('active', cwMode === 'straight');
+        }
         break;
 
       case 'sources':
@@ -716,11 +754,24 @@
     return workedQsos.has((s.callsign || '').toUpperCase());
   }
 
+  // Map spot mode to filter category
+  var KNOWN_MODES = new Set(['CW', 'SSB', 'FT8', 'FT4', 'FM', 'RTTY']);
+  function spotModeCategory(mode) {
+    if (!mode) return 'other';
+    var m = mode.toUpperCase();
+    if (m === 'USB' || m === 'LSB') return 'SSB';
+    if (m === 'AM') return 'other';
+    if (KNOWN_MODES.has(m)) return m;
+    return 'other';
+  }
+
   function getFilteredSpots() {
     const bands = getDropdownValues(bandFilterEl);
+    const modes = getDropdownValues(modeFilterEl);
     const regions = getDropdownValues(regionFilterEl);
     const filtered = spots.filter(s => {
       if (bands && !bands.has(s.band)) return false;
+      if (modes && !modes.has(spotModeCategory(s.mode))) return false;
       if (regions && s.continent && !regions.has(s.continent)) return false;
       if (showNewOnly && !isNewPark(s)) return false;
       if (hideWorked && isWorkedSpot(s)) return false;
@@ -969,6 +1020,7 @@
 
   // Initialize band and region dropdowns
   initMultiDropdown(bandFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); });
+  initMultiDropdown(modeFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); });
   initMultiDropdown(regionFilterEl, () => { renderSpots(); if (activeTab === 'map') renderMapSpots(); });
 
   // --- Spots dropdown ---
@@ -1010,12 +1062,9 @@
     if (activeTab === 'map') renderMapSpots();
   });
 
-  // --- Frequency direct input ---
+  // --- Frequency direct input (legacy — kept for keyboard fallback) ---
   freqDisplay.addEventListener('click', () => {
-    statusBar.classList.add('editing');
-    freqInput.value = currentFreqKhz ? Math.round(currentFreqKhz * 10) / 10 : '';
-    freqInput.focus();
-    freqInput.select();
+    openDialPad();
   });
 
   function submitFreq() {
@@ -1044,6 +1093,129 @@
     setTimeout(() => {
       if (statusBar.classList.contains('editing')) cancelFreqEdit();
     }, 200);
+  });
+
+  // --- Dial Pad ---
+  const STEP_SIZES = [0.1, 0.5, 1, 5, 10, 25, 100];
+  let dpStepIdx = 2; // default 1 kHz
+  let dpInput = '';
+
+  function openDialPad() {
+    dpInput = currentFreqKhz ? (Math.round(currentFreqKhz * 10) / 10).toString() : '';
+    updateDpDisplay();
+    dialPad.classList.remove('hidden');
+    dialPadBackdrop.classList.remove('hidden');
+  }
+
+  function closeDialPad() {
+    dialPad.classList.add('hidden');
+    dialPadBackdrop.classList.add('hidden');
+  }
+
+  function updateDpDisplay() {
+    if (!dpInput) {
+      dpFreq.textContent = '---.---.---';
+      dpFreq.classList.add('empty');
+    } else {
+      dpFreq.classList.remove('empty');
+      // Format as MHz.kHz.Hz display
+      const val = parseFloat(dpInput);
+      if (!isNaN(val) && val > 0) {
+        const hz = Math.round(val * 1000);
+        dpFreq.textContent = formatFreq(hz);
+      } else {
+        dpFreq.textContent = dpInput;
+      }
+    }
+  }
+
+  function dpTune(freqKhz) {
+    if (!freqKhz || isNaN(freqKhz) || freqKhz < 100 || freqKhz > 500000) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'tune', freqKhz: freqKhz.toString(), mode: '' }));
+    }
+    // Immediately update local display
+    const hz = Math.round(freqKhz * 1000);
+    freqDisplay.textContent = formatFreq(hz);
+    currentFreqKhz = freqKhz;
+  }
+
+  // Number button clicks
+  dialPad.querySelector('.dp-grid').addEventListener('click', (e) => {
+    const btn = e.target.closest('.dp-btn');
+    if (!btn) return;
+    const val = btn.dataset.val;
+    if (val === 'del') {
+      dpInput = dpInput.slice(0, -1);
+    } else if (val === '.') {
+      if (!dpInput.includes('.')) dpInput += dpInput ? '.' : '0.';
+    } else {
+      dpInput += val;
+    }
+    updateDpDisplay();
+  });
+
+  dpGo.addEventListener('click', () => {
+    const val = parseFloat(dpInput);
+    dpTune(val);
+    closeDialPad();
+  });
+
+  dpCancel.addEventListener('click', closeDialPad);
+  dialPadBackdrop.addEventListener('click', closeDialPad);
+
+  dpClear.addEventListener('click', () => {
+    dpInput = '';
+    updateDpDisplay();
+  });
+
+  // Step size cycle
+  function updateStepLabel() {
+    const s = STEP_SIZES[dpStepIdx];
+    dpStepSize.textContent = s >= 1 ? s + ' kHz' : (s * 1000) + ' Hz';
+  }
+  updateStepLabel();
+
+  dpStepSize.addEventListener('click', () => {
+    dpStepIdx = (dpStepIdx + 1) % STEP_SIZES.length;
+    updateStepLabel();
+  });
+
+  // Step up/down inside dial pad — tunes immediately
+  dpStepUp.addEventListener('click', () => {
+    const step = STEP_SIZES[dpStepIdx];
+    const base = dpInput ? parseFloat(dpInput) : currentFreqKhz;
+    if (!base || isNaN(base)) return;
+    const newFreq = Math.round((base + step) * 10) / 10;
+    dpInput = newFreq.toString();
+    updateDpDisplay();
+    dpTune(newFreq);
+  });
+
+  dpStepDown.addEventListener('click', () => {
+    const step = STEP_SIZES[dpStepIdx];
+    const base = dpInput ? parseFloat(dpInput) : currentFreqKhz;
+    if (!base || isNaN(base)) return;
+    const newFreq = Math.round((base - step) * 10) / 10;
+    if (newFreq < 100) return;
+    dpInput = newFreq.toString();
+    updateDpDisplay();
+    dpTune(newFreq);
+  });
+
+  // Status bar up/down buttons — quick step without opening dial pad
+  freqUpBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const step = STEP_SIZES[dpStepIdx];
+    const newFreq = Math.round((currentFreqKhz + step) * 10) / 10;
+    dpTune(newFreq);
+  });
+
+  freqDownBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const step = STEP_SIZES[dpStepIdx];
+    const newFreq = Math.round((currentFreqKhz - step) * 10) / 10;
+    if (newFreq >= 100) dpTune(newFreq);
   });
 
   // --- PTT ---
@@ -2936,6 +3108,289 @@
       const idx = parseInt(header.dataset.idx, 10);
       expandedQsoIdx = expandedQsoIdx === idx ? -1 : idx;
       renderLogbook();
+    }
+  });
+
+  // --- CW Keyer ---
+  let cwAvailable = false;
+  let cwWpm = 20;
+  let cwMode = 'iambicB';
+  let cwSidetoneFreq = 600;
+  let cwSidetoneVol = 0.8;
+  let cwAudioCtx = null;
+  let cwOsc = null;
+  let cwGain = null;
+  let cwKeying = false;
+
+  // Default macros — overridden by server settings if configured
+  var DEFAULT_CW_MACROS = [
+    { label: 'CQ', text: 'CQ CQ CQ DE {MYCALL} {MYCALL} K' },
+    { label: '599', text: 'R UR 599 5NN BK' },
+    { label: '73', text: 'RR 73 E E' },
+    { label: 'AGN', text: 'AGN AGN PSE' },
+    { label: 'TU', text: 'TU DE {MYCALL} K' },
+  ];
+  var cwMacros = JSON.parse(localStorage.getItem('echocat-cw-macros') || 'null') || DEFAULT_CW_MACROS.slice();
+
+  const cwPanel = document.getElementById('cw-panel');
+  const cwIndicator = document.getElementById('cw-indicator');
+  const cwWpmLabel = document.getElementById('cw-wpm-label');
+  const cwWpmDn = document.getElementById('cw-wpm-dn');
+  const cwWpmUp = document.getElementById('cw-wpm-up');
+  const cwModeB = document.getElementById('cw-mode-b');
+  const cwModeA = document.getElementById('cw-mode-a');
+  const cwModeStr = document.getElementById('cw-mode-str');
+  const cwToneSlider = document.getElementById('cw-tone-slider');
+  const cwToneVal = document.getElementById('cw-tone-val');
+  const cwVolSlider = document.getElementById('cw-vol-slider');
+  const cwMacroRow = document.getElementById('cw-macro-row');
+  const cwTextInput = document.getElementById('cw-text-input');
+  const cwTextSend = document.getElementById('cw-text-send');
+  const soCwEnable = document.getElementById('so-cw-enable');
+  const soCwMacros = document.getElementById('so-cw-macros');
+
+  // Unlock AudioContext on first user interaction (Chromium autoplay policy)
+  var cwAudioUnlocked = false;
+  function ensureCwAudioCtx() {
+    if (!cwAudioCtx) {
+      cwAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (cwAudioCtx.state === 'suspended') {
+      cwAudioCtx.resume();
+    }
+    return cwAudioCtx;
+  }
+
+  document.addEventListener('touchstart', function unlockCwAudio() {
+    ensureCwAudioCtx();
+    cwAudioUnlocked = true;
+    document.removeEventListener('touchstart', unlockCwAudio);
+  }, { once: true });
+  document.addEventListener('click', function unlockCwAudioClick() {
+    ensureCwAudioCtx();
+    cwAudioUnlocked = true;
+    document.removeEventListener('click', unlockCwAudioClick);
+  }, { once: true });
+
+  function handleCwSidetone(keying) {
+    cwKeying = keying;
+    if (!cwAudioCtx) ensureCwAudioCtx();
+    if (keying) {
+      if (cwOsc) return; // already playing
+      cwOsc = cwAudioCtx.createOscillator();
+      cwOsc.type = 'sine';
+      cwOsc.frequency.value = cwSidetoneFreq;
+      cwGain = cwAudioCtx.createGain();
+      cwGain.gain.value = 0;
+      cwOsc.connect(cwGain);
+      cwGain.connect(cwAudioCtx.destination);
+      cwOsc.start();
+      cwGain.gain.linearRampToValueAtTime(cwSidetoneVol, cwAudioCtx.currentTime + 0.005);
+    } else {
+      if (cwGain) {
+        cwGain.gain.linearRampToValueAtTime(0, cwAudioCtx.currentTime + 0.005);
+      }
+      if (cwOsc) {
+        var osc = cwOsc;
+        setTimeout(function() { try { osc.stop(); } catch(e){} }, 10);
+        cwOsc = null;
+        cwGain = null;
+      }
+    }
+  }
+
+  function sendCwConfig() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cw-config', wpm: cwWpm, mode: cwMode }));
+    }
+  }
+
+  function sendCwText(text) {
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'cw-text', text: text }));
+  }
+
+  // --- Macro buttons ---
+  function renderCwMacros() {
+    cwMacroRow.innerHTML = '';
+    cwMacros.forEach(function(m, i) {
+      if (!m.label && !m.text) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cw-macro-btn';
+      btn.textContent = m.label || ('M' + (i + 1));
+      btn.title = m.text || '';
+      btn.addEventListener('click', function() {
+        if (m.text) {
+          sendCwText(m.text);
+          btn.classList.add('sending');
+          setTimeout(function() { btn.classList.remove('sending'); }, 500);
+        }
+      });
+      cwMacroRow.appendChild(btn);
+    });
+  }
+  renderCwMacros();
+
+  // --- Free-text CW input ---
+  cwTextSend.addEventListener('click', function() {
+    var text = cwTextInput.value.trim();
+    if (text) {
+      sendCwText(text);
+      cwTextInput.value = '';
+    }
+  });
+  cwTextInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      cwTextSend.click();
+    }
+  });
+
+  // --- Settings: CW enable toggle ---
+  function updateCwEnableBtn() {
+    soCwEnable.textContent = cwAvailable ? 'On' : 'Off';
+    soCwEnable.classList.toggle('active', cwAvailable);
+    soCwMacros.classList.toggle('hidden', !cwAvailable);
+  }
+
+  soCwEnable.addEventListener('click', function() {
+    var newState = !cwAvailable;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cw-enable', enabled: newState }));
+    }
+    // Optimistic update — server will confirm with cw-available
+    cwAvailable = newState;
+    cwPanel.classList.toggle('hidden', !cwAvailable);
+    updateCwEnableBtn();
+  });
+
+  // --- Settings: CW macro editor ---
+  function loadMacroEditor() {
+    for (var i = 0; i < 5; i++) {
+      var row = document.getElementById('so-macro-' + (i + 1));
+      if (!row) continue;
+      var labelInput = row.querySelector('.so-macro-label');
+      var textInput = row.querySelector('.so-macro-text');
+      var m = cwMacros[i] || { label: '', text: '' };
+      labelInput.value = m.label || '';
+      textInput.value = m.text || '';
+    }
+  }
+
+  function saveMacrosFromEditor() {
+    var newMacros = [];
+    for (var i = 0; i < 5; i++) {
+      var row = document.getElementById('so-macro-' + (i + 1));
+      if (!row) continue;
+      var labelInput = row.querySelector('.so-macro-label');
+      var textInput = row.querySelector('.so-macro-text');
+      newMacros.push({
+        label: (labelInput.value || '').trim(),
+        text: (textInput.value || '').trim().toUpperCase(),
+      });
+    }
+    cwMacros = newMacros;
+    localStorage.setItem('echocat-cw-macros', JSON.stringify(cwMacros));
+    renderCwMacros();
+  }
+
+  // Auto-save macros on blur from any macro editor input
+  soCwMacros.addEventListener('focusout', function() {
+    saveMacrosFromEditor();
+  });
+
+  // Load macro editor when settings opened
+  var origRigToggle = document.getElementById('rig-ctrl-toggle');
+  if (origRigToggle) {
+    origRigToggle.addEventListener('click', function() {
+      loadMacroEditor();
+      updateCwEnableBtn();
+    });
+  }
+
+  // Sync macros from server settings (if configured on desktop)
+  function syncMacrosFromSettings(serverMacros) {
+    if (serverMacros && Array.isArray(serverMacros) && serverMacros.length > 0) {
+      // Only overwrite if user hasn't customized locally
+      var localCustom = localStorage.getItem('echocat-cw-macros');
+      if (!localCustom) {
+        cwMacros = serverMacros;
+        renderCwMacros();
+      }
+    }
+  }
+
+  // WPM buttons
+  cwWpmDn.addEventListener('click', function() {
+    cwWpm = Math.max(5, cwWpm - 1);
+    cwWpmLabel.textContent = cwWpm + ' WPM';
+    sendCwConfig();
+  });
+  cwWpmUp.addEventListener('click', function() {
+    cwWpm = Math.min(50, cwWpm + 1);
+    cwWpmLabel.textContent = cwWpm + ' WPM';
+    sendCwConfig();
+  });
+
+  // Mode buttons
+  [cwModeB, cwModeA, cwModeStr].forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      cwMode = btn.dataset.mode;
+      cwModeB.classList.toggle('active', cwMode === 'iambicB');
+      cwModeA.classList.toggle('active', cwMode === 'iambicA');
+      cwModeStr.classList.toggle('active', cwMode === 'straight');
+      sendCwConfig();
+    });
+  });
+
+  // Sidetone frequency slider
+  cwToneSlider.addEventListener('input', function() {
+    cwSidetoneFreq = parseInt(cwToneSlider.value, 10);
+    cwToneVal.textContent = cwSidetoneFreq;
+    if (cwOsc) cwOsc.frequency.value = cwSidetoneFreq;
+  });
+
+  // Sidetone volume slider
+  cwVolSlider.addEventListener('input', function() {
+    cwSidetoneVol = parseInt(cwVolSlider.value, 10) / 100;
+    if (cwGain && cwKeying) cwGain.gain.value = cwSidetoneVol;
+  });
+
+  // --- Keyboard paddle input (TinyMIDI Keyboard mode: [ = dit, ] = dah) ---
+  var ditDown = false;
+  var dahDown = false;
+
+  function sendPaddle(contact, state) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'paddle', contact: contact, state: state }));
+    }
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (!cwAvailable) return;
+    if (e.repeat) return;
+    if (isInputFocused()) return;
+    if (e.key === '[') {
+      e.preventDefault();
+      if (!ditDown) { ditDown = true; sendPaddle('dit', 1); }
+    } else if (e.key === ']') {
+      e.preventDefault();
+      if (!dahDown) { dahDown = true; sendPaddle('dah', 1); }
+    }
+  });
+
+  document.addEventListener('keyup', function(e) {
+    if (!cwAvailable) return;
+    if (isInputFocused()) return;
+    if (e.key === '[') {
+      e.preventDefault();
+      ditDown = false;
+      sendPaddle('dit', 0);
+    } else if (e.key === ']') {
+      e.preventDefault();
+      dahDown = false;
+      sendPaddle('dah', 0);
     }
   });
 

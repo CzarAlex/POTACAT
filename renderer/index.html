@@ -1339,7 +1339,13 @@
           </label>
         </div>
         <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-remote-cw-enabled"> Enable Remote CW Keyer</label>
-        <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). Requires SmartSDR (FlexRadio).</span>
+        <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). Requires SmartSDR (FlexRadio) or CW Key Port.</span>
+        <div style="margin-top:6px;margin-left:12px;">
+          <label>CW Key Port (DTR keying):
+            <select id="set-cw-key-port" style="width:220px;"><option value="">(none)</option></select>
+          </label>
+          <span class="help-text" style="display:block;">External USB-serial adapter for DTR CW keying (QMX, etc). Separate from CAT port.</span>
+        </div>
         <div id="remote-url-display" style="margin-top:8px;font-family:monospace;font-size:12px;"></div>
         <span class="help-text">To use ECHOCAT securely outside your home network, install <a href="https://tailscale.com" target="_blank" style="color:#4fc3f7;">Tailscale</a> on both your shack computer and phone. Audio, tuning, and PTT are all encrypted over the Tailscale VPN.</span>
         <!-- Club Station Mode -->
@@ -1379,7 +1385,7 @@
       <button id="settings-cancel">Cancel</button>
     </div>
     <div class="settings-footer">
-      <div class="settings-version">v1.0.10 &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
+      <div class="settings-version">v1.0.11 &mdash; <a href="#" id="bio-link">Casey Stanton, K3SBP</a></div>
       <div class="settings-coffee"><a href="#" id="coffee-link">Buy Me a Coffee</a></div>
       <div class="settings-links">
         <a href="#" id="discord-link">Discord</a>

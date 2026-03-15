@@ -105,6 +105,7 @@ let pskrSpots = [];       // streaming PSKReporter FreeDV spots (FIFO, max 500)
 let pskrFlushTimer = null; // throttle timer for PSKReporter → renderer updates
 let keyer = null;          // IambicKeyer instance for CW MIDI keying
 let remoteServer = null;   // RemoteServer instance for phone remote access
+let cwKeyPort = null;      // Dedicated SerialPort for DTR CW keying (external USB-serial adapter)
 let remoteAudioWin = null; // hidden BrowserWindow for WebRTC audio bridge
 let _currentFreqHz = 0;    // tracked for remote radio status
 let _currentMode = '';
@@ -1460,6 +1461,7 @@ function needsSmartSdr() {
   // or CW XIT offset is configured (XIT is applied via SmartSDR slice commands)
   if (settings.smartSdrSpots) return true;
   if (settings.enableCwKeyer) return true;
+  if (settings.enableRemote && settings.remoteCwEnabled) return true;
   if (settings.enableWsjtx && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.enableRemote && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.cwXit && settings.catTarget && settings.catTarget.type === 'tcp') return true;
@@ -1481,7 +1483,7 @@ function connectSmartSdr() {
   }
   smartSdr.setPersistentId(settings.smartSdrClientId);
   // Tell SmartSDR whether CW keyer needs GUI auth
-  smartSdr.setNeedsCw(!!settings.enableCwKeyer);
+  smartSdr.setNeedsCw(!!(settings.enableCwKeyer || (settings.enableRemote && settings.remoteCwEnabled)));
   // Bind to GUI client for ECHOCAT rig controls (ATU, etc.)
   smartSdr.setNeedsBind(!!settings.enableRemote);
   // Log CW auth results
@@ -1676,7 +1678,52 @@ function updateRemoteSettings() {
     maxAgeMin: settings.maxAgeMin != null ? settings.maxAgeMin : 5,
     distUnit: settings.distUnit || 'mi',
     cwXit: settings.cwXit || 0,
+    remoteCwEnabled: !!settings.remoteCwEnabled,
+    remoteCwMacros: settings.remoteCwMacros || null,
   });
+}
+
+// --- CW Key Port (dedicated DTR keying via external USB-serial adapter) ---
+function connectCwKeyPort() {
+  disconnectCwKeyPort();
+  const portPath = settings.cwKeyPort;
+  if (!portPath) return;
+  const { SerialPort } = require('serialport');
+  const port = new SerialPort({
+    path: portPath,
+    baudRate: 38400, // CDC-ACM ignores baud, but match QMX default just in case
+    autoOpen: false,
+    rtscts: false,
+    hupcl: false,
+  });
+  cwKeyPort = port;
+  port.on('open', () => {
+    // Force DTR low initially (key up), RTS low too
+    port.set({ dtr: false, rts: false }, () => {});
+    console.log(`[CW Key Port] Opened ${portPath} for DTR keying`);
+  });
+  port.on('error', (err) => {
+    console.log(`[CW Key Port] Error: ${err.message}`);
+  });
+  port.on('close', () => {
+    console.log(`[CW Key Port] Closed ${portPath}`);
+    cwKeyPort = null;
+  });
+  port.open((err) => {
+    if (err) {
+      console.log(`[CW Key Port] Open failed: ${err.message}`);
+      cwKeyPort = null;
+    }
+  });
+}
+
+function disconnectCwKeyPort() {
+  if (cwKeyPort) {
+    // Force key up before closing
+    try { cwKeyPort.set({ dtr: false }, () => {}); } catch {}
+    if (cwKeyPort.isOpen) cwKeyPort.close();
+    cwKeyPort = null;
+  }
 }
 
 function connectRemote() {
@@ -1729,8 +1776,86 @@ function connectRemote() {
     if (win && !win.isDestroyed()) {
       win.webContents.send('remote-status', { connected: false });
     }
+    // CW safety: ensure PTT released on disconnect (keyer.stop() is handled in RemoteServer)
+    if (smartSdr && smartSdr.connected) {
+      smartSdr.cwPttRelease();
+    }
+    // Force CW key port DTR low (key up) on disconnect
+    if (cwKeyPort && cwKeyPort.isOpen) {
+      cwKeyPort.set({ dtr: false }, () => {});
+    }
     destroyRemoteAudioWindow();
   });
+
+  // CW keyer output: route IambicKeyer key events to radio
+  remoteServer.setCwKeyerOutput(({ down }) => {
+    // FlexRadio via SmartSDR TCP API — cw key 0|1 with client_handle
+    if (smartSdr && smartSdr.connected) {
+      if (down) {
+        smartSdr.cwPttOn(); // activate CW PTT (with holdoff auto-release)
+      }
+      smartSdr.cwKey(down);
+    }
+    // Dedicated CW Key Port — DTR keying via external USB-serial adapter
+    if (cwKeyPort && cwKeyPort.isOpen) {
+      cwKeyPort.set({ dtr: !!down }, (err) => {
+        if (err) console.log(`[CW Key Port] DTR error: ${err.message}`);
+      });
+    }
+  });
+
+  // CW config changes from phone (WPM)
+  remoteServer.on('cw-config', ({ wpm }) => {
+    if (smartSdr && smartSdr.connected) {
+      smartSdr.setCwSpeed(wpm);
+    }
+    // Also set KS on serial CAT (QMX etc.)
+    if (cat && cat.connected) {
+      cat.setCwSpeed(wpm);
+    }
+  });
+
+  // CW text macros/freeform from phone — route to radio
+  remoteServer.on('cw-text', ({ text }) => {
+    if (!text) return;
+    // Substitute {MYCALL} with the user's callsign
+    const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '');
+    console.log(`[Echo CAT] CW text: ${expanded}`);
+    // Serial CAT (QMX/QDX/Kenwood): use KY command
+    if (cat && cat.connected) {
+      cat.sendCwText(expanded);
+    }
+    // SmartSDR: use cw send command (Flex supports text sending too)
+    // Note: SmartSDR's `cw send` is character-level like KY
+    // For now, route through CAT. If no CAT but SmartSDR, we could add
+    // smartSdr.sendCwText() in the future.
+  });
+
+  // Phone requests to toggle remote CW on/off
+  remoteServer.on('cw-enable-request', ({ enabled }) => {
+    settings.remoteCwEnabled = !!enabled;
+    saveSettings(settings);
+    remoteServer.setCwEnabled(!!enabled);
+    if (enabled && smartSdr) {
+      smartSdr.setNeedsCw(true);
+    }
+    // Notify desktop UI
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('settings-changed', { remoteCwEnabled: !!enabled });
+    }
+    console.log(`[Echo CAT] Remote CW ${enabled ? 'enabled' : 'disabled'} by phone`);
+  });
+
+  // Enable remote CW if setting is on
+  if (settings.remoteCwEnabled) {
+    remoteServer.setCwEnabled(true);
+    if (smartSdr) smartSdr.setNeedsCw(true);
+  }
+
+  // Open dedicated CW Key Port if configured
+  if (settings.cwKeyPort) {
+    connectCwKeyPort();
+  }
 
   remoteServer.on('set-sources', (sources) => {
     if (!sources) return;
@@ -2309,6 +2434,7 @@ function connectRemote() {
 }
 
 function disconnectRemote() {
+  disconnectCwKeyPort();
   if (remoteServer) {
     remoteServer.removeAllListeners();
     remoteServer.stop();
@@ -2884,16 +3010,13 @@ function sendMergedSpots() {
   win.webContents.send('spots', merged);
   pushSpotsToSmartSdr(merged);
   pushSpotsToTci(merged);
-  // Forward to ECHOCAT — SSB only (net spots always pass), respect max spot age
+  // Forward to ECHOCAT — all modes (phone-side Mode dropdown handles filtering), respect max spot age
   if (remoteServer && remoteServer.running) {
     const maxAgeMs = ((settings.maxAgeMin != null ? settings.maxAgeMin : 5) * 60000) || 300000;
     const now = Date.now();
     const echoSpots = merged.filter(s => {
       // Net spots always pass through to ECHOCAT
       if (s.source === 'net') return true;
-      // SSB only
-      const m = (s.mode || '').toUpperCase();
-      if (m !== 'SSB' && m !== 'USB' && m !== 'LSB') return false;
       // Age filter
       if (s.spotTime) {
         const t = s.spotTime.endsWith('Z') ? s.spotTime : s.spotTime + 'Z';
@@ -4515,6 +4638,16 @@ app.on('open-url', (event, url) => {
 });
 
 app.whenReady().then(() => {
+  // Add Referer header for OpenStreetMap tile requests (required by OSM usage policy)
+  const { session } = require('electron');
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://*.tile.openstreetmap.org/*'] },
+    (details, callback) => {
+      details.requestHeaders['Referer'] = 'https://potacat.com';
+      callback({ requestHeaders: details.requestHeaders });
+    }
+  );
+
   Menu.setApplicationMenu(null);
   settings = loadSettings();
   migrateRigSettings(settings);
@@ -5307,7 +5440,9 @@ app.whenReady().then(() => {
       (has('remoteToken') && newSettings.remoteToken !== settings.remoteToken) ||
       (has('remoteRequireToken') && newSettings.remoteRequireToken !== settings.remoteRequireToken) ||
       (has('clubMode') && newSettings.clubMode !== settings.clubMode) ||
-      (has('clubCsvPath') && newSettings.clubCsvPath !== settings.clubCsvPath);
+      (has('clubCsvPath') && newSettings.clubCsvPath !== settings.clubCsvPath) ||
+      (has('remoteCwEnabled') && newSettings.remoteCwEnabled !== settings.remoteCwEnabled) ||
+      (has('cwKeyPort') && newSettings.cwKeyPort !== settings.cwKeyPort);
 
     const iconChanged = has('lightIcon') && newSettings.lightIcon !== settings.lightIcon;
 
@@ -5352,7 +5487,7 @@ app.whenReady().then(() => {
     }
 
     // Reconnect SmartSDR if settings changed (also needed for WSJT-X+Flex and CW keyer)
-    if (smartSdrChanged || wsjtxChanged || cwKeyerChanged) {
+    if (smartSdrChanged || wsjtxChanged || cwKeyerChanged || remoteChanged) {
       connectSmartSdr(); // needsSmartSdr() decides whether to actually connect
     }
 

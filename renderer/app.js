@@ -450,6 +450,7 @@ const rigRemoteAudioOutput = document.getElementById('rig-remote-audio-output');
 const remoteAudioSummary = document.getElementById('remote-audio-summary');
 const setRemotePttTimeout = document.getElementById('set-remote-ptt-timeout');
 const setRemoteCwEnabled = document.getElementById('set-remote-cw-enabled');
+const setCwKeyPort = document.getElementById('set-cw-key-port');
 const remoteUrlDisplay = document.getElementById('remote-url-display');
 const remoteTxIndicator = document.getElementById('remote-tx-indicator');
 // Club Station Mode
@@ -6138,6 +6139,18 @@ async function openSettingsDialog() {
   setRemoteToken.value = s.remoteToken || '';
   setRemotePttTimeout.value = s.remotePttTimeout || 180;
   setRemoteCwEnabled.checked = !!s.remoteCwEnabled;
+  // Populate CW Key Port dropdown
+  try {
+    const cwPorts = await window.api.listPorts();
+    setCwKeyPort.innerHTML = '<option value="">(none)</option>';
+    for (const p of cwPorts) {
+      const opt = document.createElement('option');
+      opt.value = p.path;
+      opt.textContent = `${p.path} — ${p.friendlyName}`;
+      if (s.cwKeyPort === p.path) opt.selected = true;
+      setCwKeyPort.appendChild(opt);
+    }
+  } catch { /* ports unavailable */ }
   if (enableRemote) {
     populateRemoteURLs();
   }
@@ -6272,6 +6285,7 @@ settingsSave.addEventListener('click', async () => {
   const remoteTokenVal = setRemoteToken.value;
   const remotePttTimeoutVal = parseInt(setRemotePttTimeout.value, 10) || 180;
   const remoteCwEnabledVal = setRemoteCwEnabled.checked;
+  const cwKeyPortVal = setCwKeyPort.value || '';
   const clubModeEnabled = setClubMode.checked;
   const clubCsvPathVal = setClubCsvPath.value || '';
   // Audio comes from the active rig (resolved after selectedRig below)
@@ -6412,6 +6426,7 @@ settingsSave.addEventListener('click', async () => {
     remoteToken: remoteTokenVal,
     remotePttTimeout: remotePttTimeoutVal,
     remoteCwEnabled: remoteCwEnabledVal,
+    cwKeyPort: cwKeyPortVal,
     clubMode: clubModeEnabled,
     clubCsvPath: clubCsvPathVal,
     remoteAudioInput: selectedRig ? (selectedRig.remoteAudioInput || '') : '',
