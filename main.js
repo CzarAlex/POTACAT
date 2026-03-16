@@ -4075,6 +4075,9 @@ function forwardToLogbook(qsoData) {
   if (type === 'wavelog') {
     return sendWavelogHttp(qsoData);
   }
+  if (type === 'wrl') {
+    return sendWrlUdp(qsoData, host, port || 12060);
+  }
   return Promise.resolve();
 }
 
@@ -4096,6 +4099,65 @@ function sendUdpAdif(qsoData, host, port) {
       else resolve();
     });
   });
+}
+
+/**
+ * Send a QSO to World Radio League via N1MM-compatible ContactInfo UDP.
+ * WRL Cat Control listens for these and forwards to the WRL cloud logbook.
+ */
+function sendWrlUdp(qsoData, host, port) {
+  return new Promise((resolve, reject) => {
+    const dgram = require('dgram');
+    const call = qsoData.callsign || '';
+    const mycall = qsoData.operator || settings.myCallsign || '';
+    const freqKhz = parseFloat(qsoData.frequency) || 0;
+    const rxfreq = Math.round(freqKhz * 100).toString(); // N1MM uses 10 Hz units
+    const txfreq = rxfreq;
+    const mode = (qsoData.mode || 'SSB').toUpperCase();
+    const band = (qsoData.band || '').toUpperCase();
+    const snt = qsoData.rstSent || '59';
+    const rcv = qsoData.rstRcvd || '59';
+    const dateStr = qsoData.qsoDate || '';
+    const timeStr = qsoData.timeOn || '';
+    const ts = dateStr.length === 8 && timeStr.length >= 4
+      ? `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)} ${timeStr.slice(0,2)}:${timeStr.slice(2,4)}:00`
+      : new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const comment = qsoData.comment || '';
+    const grid = qsoData.gridsquare || '';
+    const contestName = qsoData.sig || '';
+    const contestNr = qsoData.sigInfo || '';
+
+    const xml = `<?xml version="1.0" encoding="utf-8"?>\n<contactinfo>\n`
+      + `  <app>POTACAT</app>\n`
+      + `  <contestname>${escXml(contestName)}</contestname>\n`
+      + `  <contestnr>${escXml(contestNr)}</contestnr>\n`
+      + `  <timestamp>${escXml(ts)}</timestamp>\n`
+      + `  <mycall>${escXml(mycall)}</mycall>\n`
+      + `  <operator>${escXml(mycall)}</operator>\n`
+      + `  <band>${escXml(band)}</band>\n`
+      + `  <rxfreq>${rxfreq}</rxfreq>\n`
+      + `  <txfreq>${txfreq}</txfreq>\n`
+      + `  <call>${escXml(call)}</call>\n`
+      + `  <mode>${escXml(mode)}</mode>\n`
+      + `  <snt>${escXml(snt)}</snt>\n`
+      + `  <rcv>${escXml(rcv)}</rcv>\n`
+      + `  <gridsquare>${escXml(grid)}</gridsquare>\n`
+      + `  <comment>${escXml(comment)}</comment>\n`
+      + `</contactinfo>\n`;
+
+    const message = Buffer.from(xml, 'utf-8');
+    const client = dgram.createSocket('udp4');
+    client.send(message, 0, message.length, port, host, (err) => {
+      client.close();
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+function escXml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /**

@@ -152,6 +152,7 @@
         <button id="popout-map-btn" class="view-btn popout-btn" title="Pop-out map window">&#x2197;</button>
         <button id="view-rbn-btn" class="view-btn hidden" title="Reverse Beacon Network">RBN</button>
         <button id="cluster-terminal-btn" class="view-btn hidden" title="DX Cluster Terminal">Terminal</button>
+        <button id="view-directory-btn" class="view-btn hidden" title="HF Nets &amp; SWL Broadcast Directory">Directory</button>
         <button id="view-jtcat-btn" class="view-btn hidden" title="JTCAT — FT8/FT4 Digital Modes">JTCAT</button>
       </div>
     </div>
@@ -626,6 +627,86 @@
         </table>
       </div>
       <div id="dxcc-placeholder" class="hidden">No QSOs logged yet. Log some contacts or import a log to see DXCC progress.</div>
+    </div>
+    <div id="directory-view" class="hidden">
+      <div class="directory-view-header">
+        <div class="directory-tabs">
+          <button id="dirv-tab-nets" class="directory-tab active" type="button">HF Nets</button>
+          <button id="dirv-tab-swl" class="directory-tab" type="button">SWL Broadcasts</button>
+        </div>
+        <input type="text" id="dirv-search" class="directory-search" placeholder="Search nets &amp; broadcasts...">
+        <select id="dirv-band-filter" class="dirv-filter-select">
+          <option value="all">All Bands</option>
+          <option value="160m">160m</option>
+          <option value="80m">80m</option>
+          <option value="60m">60m</option>
+          <option value="40m">40m</option>
+          <option value="30m">30m</option>
+          <option value="20m">20m</option>
+          <option value="17m">17m</option>
+          <option value="15m">15m</option>
+          <option value="12m">12m</option>
+          <option value="10m">10m</option>
+          <option value="6m">6m</option>
+          <option value="2m">2m</option>
+          <option value="MW">MW</option>
+          <option value="SW">SW</option>
+        </select>
+        <select id="dirv-status-filter" class="dirv-filter-select">
+          <option value="all">All</option>
+          <option value="live">On Air Now</option>
+          <option value="today">Scheduled Today</option>
+        </select>
+        <button id="dirv-refresh-btn" type="button" class="directory-refresh" title="Refresh from Google Sheets">&#x21BB;</button>
+        <span id="dirv-count" class="dirv-count"></span>
+      </div>
+      <div id="dirv-nets-container" class="directory-view-table-container">
+        <table class="directory-view-table">
+          <thead>
+            <tr>
+              <th class="dirv-status-col" data-dir-col="status">Status</th>
+              <th class="dirv-name-col" data-dir-col="name">Net Name</th>
+              <th class="dirv-freq-col" data-dir-col="freq">Freq (kHz)</th>
+              <th class="dirv-mode-col" data-dir-col="mode">Mode</th>
+              <th class="dirv-band-col" data-dir-col="band">Band</th>
+              <th class="dirv-days-col" data-dir-col="days">Days</th>
+              <th class="dirv-time-col" data-dir-col="time">Time (UTC)</th>
+              <th class="dirv-next-col" data-dir-col="next">Next</th>
+              <th class="dirv-dur-col" data-dir-col="dur">Dur</th>
+              <th class="dirv-region-col" data-dir-col="region">Region</th>
+              <th class="dirv-notes-col" data-dir-col="notes">Notes</th>
+              <th class="dirv-action-col" data-dir-col="action"></th>
+            </tr>
+          </thead>
+          <tbody id="dirv-nets-body"></tbody>
+        </table>
+      </div>
+      <div id="dirv-swl-container" class="directory-view-table-container hidden">
+        <table class="directory-view-table">
+          <thead>
+            <tr>
+              <th class="dirv-status-col" data-dir-col="status">Status</th>
+              <th class="dirv-name-col" data-dir-col="name">Station</th>
+              <th class="dirv-freq-col" data-dir-col="freq">Freq (kHz)</th>
+              <th class="dirv-mode-col" data-dir-col="mode">Mode</th>
+              <th class="dirv-band-col" data-dir-col="band">Band</th>
+              <th class="dirv-time-col" data-dir-col="startTime">Start (UTC)</th>
+              <th class="dirv-time-col" data-dir-col="endTime">End (UTC)</th>
+              <th class="dirv-next-col" data-dir-col="next">Status</th>
+              <th class="dirv-lang-col" data-dir-col="lang">Lang</th>
+              <th class="dirv-power-col" data-dir-col="power">Power</th>
+              <th class="dirv-region-col" data-dir-col="region">Target</th>
+              <th class="dirv-notes-col" data-dir-col="notes">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="dirv-swl-body"></tbody>
+        </table>
+      </div>
+      <div id="dirv-placeholder" class="hidden">Loading directory data...</div>
+      <div class="dirv-footer">
+        <span class="dir-suggest-link">Want a net or SWL station added? <a href="#" id="dirv-suggest-sheet">Leave a comment on the Google Sheet</a></span>
+        <span class="dirv-hint">Click a row to tune your radio</span>
+      </div>
     </div>
     <div id="rbn-view" class="hidden">
       <div class="rbn-header">
@@ -1126,6 +1207,7 @@
               <option value="macloggerdx">MacLoggerDX</option>
               <option value="n3fjp">N3FJP</option>
               <option value="wavelog">Wavelog</option>
+              <option value="wrl">World Radio League</option>
             </select>
           </label>
           <div id="logbook-instructions" class="hidden help-text" style="margin-top:6px;line-height:1.5;"></div>
@@ -1249,9 +1331,9 @@
       </div>
       <div style="margin-top:8px;border-top:1px solid var(--border-primary);padding-top:8px;">
         <label class="checkbox-label"><input type="checkbox" id="set-enable-directory"> Community HF Nets &amp; SWL Broadcast Directory</label>
-        <span class="help-text" style="margin-left:12px;display:block;">Browse and add nets from a community-managed directory.</span>
+        <span class="help-text" style="margin-left:12px;display:block;">Browse and add nets from a community-managed directory. Shows a Directory tab in the main view bar.</span>
         <div id="dir-controls" class="hidden" style="margin-top:6px;">
-          <button type="button" id="dir-browse-btn" class="settings-add-btn">Browse Directory</button>
+          <button type="button" id="dir-browse-btn" class="settings-add-btn">Open Directory View</button>
         </div>
       </div>
       <div id="dir-browser" class="hidden">

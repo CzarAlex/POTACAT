@@ -7,7 +7,7 @@ let sortAsc = true;
 
 // Expose for DevTools console debugging
 window._debug = { get spots() { return allSpots; }, get qrz() { return qrzData; }, get expeditions() { return expeditionCallsigns; }, render() { render(); } };
-let currentView = 'table'; // 'table', 'map', 'dxcc', or 'rbn' (for exclusive views)
+let currentView = 'table'; // 'table', 'map', 'dxcc', 'rbn', or 'directory' (for exclusive views)
 let showTable = true;
 let showMap = false;
 let splitOrientation = 'horizontal'; // 'horizontal' (side-by-side) or 'vertical' (stacked)
@@ -345,6 +345,24 @@ const DIR_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1fg6ZX9DokyThbvHO4
 let directoryNets = [];
 let directorySwl = [];
 let dirActiveTab = 'nets'; // 'nets' or 'swl'
+// Directory View (top-level)
+const viewDirectoryBtn = document.getElementById('view-directory-btn');
+const directoryView = document.getElementById('directory-view');
+const dirvTabNets = document.getElementById('dirv-tab-nets');
+const dirvTabSwl = document.getElementById('dirv-tab-swl');
+const dirvSearch = document.getElementById('dirv-search');
+const dirvBandFilter = document.getElementById('dirv-band-filter');
+const dirvStatusFilter = document.getElementById('dirv-status-filter');
+const dirvRefreshBtn = document.getElementById('dirv-refresh-btn');
+const dirvCount = document.getElementById('dirv-count');
+const dirvNetsContainer = document.getElementById('dirv-nets-container');
+const dirvSwlContainer = document.getElementById('dirv-swl-container');
+const dirvNetsBody = document.getElementById('dirv-nets-body');
+const dirvSwlBody = document.getElementById('dirv-swl-body');
+const dirvPlaceholder = document.getElementById('dirv-placeholder');
+const dirvSuggestSheet = document.getElementById('dirv-suggest-sheet');
+let dirvActiveTab = 'nets';
+let dirvAutoRefreshTimer = null;
 const rbnMaxAgeInput = document.getElementById('rbn-max-age');
 const rbnAgeUnitSelect = document.getElementById('rbn-age-unit');
 
@@ -803,6 +821,7 @@ async function loadPrefs() {
   updateRbnButton();
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
   updateDxccButton();
+  updateDirectoryButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.toggle('hidden', !settings.piAccess);
   // Activator mode restore
@@ -879,6 +898,8 @@ async function loadPrefs() {
         setView('rbn');
       } else if (viewState.lastView === 'dxcc' && enableDxcc) {
         setView('dxcc');
+      } else if (viewState.lastView === 'directory' && settings.enableDirectory) {
+        setView('directory');
       } else {
         showTable = viewState.showTable !== false;
         showMap = viewState.showMap === true;
@@ -2683,6 +2704,7 @@ const LOGBOOK_DEFAULTS = {
   hrd: { port: 2333, help: 'In HRD Logbook: Tools > Configure > QSO Forwarding. Under UDP Receive, check "Receive QSO notifications using UDP9/ADIF from other logging programs (eg. WSJT-X)". Set the receive port to 2333 and select your target database. POTACAT and WSJT-X can both send to this port simultaneously.' },
   macloggerdx: { port: 9090, help: 'In MacLoggerDX: Preferences > UDP > check "Enable UDP Server". Set the port to 9090 (default). MacLoggerDX must be running to receive QSOs.' },
   wavelog: { apiConfig: true },
+  wrl: { port: 12060, help: 'Requires WRL Cat Control running on this computer. Download it from worldradioleague.com. WRL Cat receives QSOs via the N1MM UDP protocol. In WRL Cat: enable N1MM integration and set the UDP port to 12060. QSOs logged in POTACAT will appear in your WRL logbook automatically.' },
 };
 
 function updateLogbookPortConfig() {
@@ -4675,8 +4697,8 @@ window.api.onJtcatPopoutStatus((open) => {
 // RBN and DXCC are exclusive views that hide the split container.
 
 function setView(view) {
-  // Called for exclusive views (rbn, dxcc) or to force a specific state
-  if (view === 'rbn' || view === 'dxcc') {
+  // Called for exclusive views (rbn, dxcc, directory) or to force a specific state
+  if (view === 'rbn' || view === 'dxcc' || view === 'directory') {
     currentView = view;
     showTable = false;
     showMap = false;
@@ -4698,11 +4720,14 @@ function updateViewLayout() {
   dxccView.classList.add('hidden');
   rbnView.classList.add('hidden');
   jtcatView.classList.add('hidden');
+  if (directoryView) directoryView.classList.add('hidden');
+  stopDirvAutoRefresh();
 
   // Deactivate all view buttons
   viewTableBtn.classList.remove('active');
   viewMapBtn.classList.remove('active');
   viewRbnBtn.classList.remove('active');
+  if (viewDirectoryBtn) viewDirectoryBtn.classList.remove('active');
 
   if (currentView === 'dxcc') {
     splitContainerEl.classList.add('hidden');
@@ -4721,6 +4746,17 @@ function updateViewLayout() {
     setTimeout(() => rbnMap.invalidateSize(), 0);
     renderRbnMarkers();
     renderRbnTable();
+    updateParksStatsOverlay();
+    saveViewState();
+    return;
+  }
+
+  if (currentView === 'directory') {
+    splitContainerEl.classList.add('hidden');
+    if (directoryView) directoryView.classList.remove('hidden');
+    if (viewDirectoryBtn) viewDirectoryBtn.classList.add('active');
+    renderDirectoryView();
+    startDirvAutoRefresh();
     updateParksStatsOverlay();
     saveViewState();
     return;
@@ -4780,7 +4816,7 @@ function saveViewState() {
 }
 
 viewTableBtn.addEventListener('click', () => {
-  if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'jtcat') {
+  if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'jtcat' || currentView === 'directory') {
     // Switching from exclusive view → table only
     if (currentView === 'jtcat') stopJtcatView();
     currentView = 'table';
@@ -4811,7 +4847,7 @@ viewMapBtn.addEventListener('click', () => {
     window.api.popoutMapOpen(); // focuses existing window
     return;
   }
-  if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'jtcat') {
+  if (currentView === 'rbn' || currentView === 'dxcc' || currentView === 'jtcat' || currentView === 'directory') {
     // Switching from exclusive view → map only
     if (currentView === 'jtcat') stopJtcatView();
     currentView = 'map';
@@ -4837,6 +4873,12 @@ viewMapBtn.addEventListener('click', () => {
 });
 
 viewRbnBtn.addEventListener('click', () => setView('rbn'));
+if (viewDirectoryBtn) viewDirectoryBtn.addEventListener('click', () => {
+  if (directoryNets.length === 0 && directorySwl.length === 0) {
+    window.api.fetchDirectory();
+  }
+  setView('directory');
+});
 viewJtcatBtn.addEventListener('click', () => {
   window.api.jtcatPopoutOpen();
 });
@@ -6757,6 +6799,7 @@ settingsSave.addEventListener('click', async () => {
   enableWsjtx = wsjtxEnabled;
   updateWsjtxStatusVisibility();
   updateRbnButton();
+  updateDirectoryButton();
   spotsTable.classList.toggle('no-source-tint', !colorRowsEnabled);
   applyColorblindMode(colorblindEnabled);
   applyWcagMode(wcagEnabled);
@@ -7577,6 +7620,578 @@ function isSwlOnAirNow(entry) {
   return nowMin >= startMin && nowMin < endMin;
 }
 
+// === Directory View (top-level) ===
+
+function freqToBandDir(khz) {
+  const f = parseFloat(khz);
+  if (!f) return '';
+  if (f >= 1800 && f <= 2000) return '160m';
+  if (f >= 3500 && f <= 4000) return '80m';
+  if (f >= 5330 && f <= 5410) return '60m';
+  if (f >= 7000 && f <= 7300) return '40m';
+  if (f >= 10100 && f <= 10150) return '30m';
+  if (f >= 14000 && f <= 14350) return '20m';
+  if (f >= 18068 && f <= 18168) return '17m';
+  if (f >= 21000 && f <= 21450) return '15m';
+  if (f >= 24890 && f <= 24990) return '12m';
+  if (f >= 28000 && f <= 29700) return '10m';
+  if (f >= 50000 && f <= 54000) return '6m';
+  if (f >= 144000 && f <= 148000) return '2m';
+  if (f >= 530 && f <= 1700) return 'MW';
+  if (f >= 2300 && f <= 26100) return 'SW';
+  return '';
+}
+
+function getNetCountdown(net) {
+  // Returns { status: 'live'|'soon'|'today'|'off', label: string, sortKey: number }
+  const now = new Date();
+  const utcH = now.getUTCHours();
+  const utcM = now.getUTCMinutes();
+  const nowMin = utcH * 60 + utcM;
+  const parts = (net.startTimeUtc || '0:0').split(':');
+  const startMin = parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
+  const dur = net.duration || 60;
+  const endMin = startMin + dur;
+  const days = (net.days || 'Daily').toLowerCase();
+
+  // Check if scheduled today
+  let scheduledToday = days === 'daily';
+  if (!scheduledToday) {
+    const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const todayAbbr = dayNames[now.getUTCDay()];
+    scheduledToday = days.includes(todayAbbr);
+  }
+
+  if (!scheduledToday) {
+    return { status: 'off', label: '', sortKey: 9999 };
+  }
+
+  // Check if on-air
+  let onAir = false;
+  if (endMin > 1440) {
+    onAir = nowMin >= startMin || nowMin < (endMin - 1440);
+  } else {
+    onAir = nowMin >= startMin && nowMin < endMin;
+  }
+
+  if (onAir) {
+    const remaining = endMin > 1440 && nowMin < startMin
+      ? (endMin - 1440) - nowMin
+      : (endMin > 1440 ? endMin - 1440 - nowMin : endMin - nowMin);
+    const rh = Math.floor(remaining / 60);
+    const rm = remaining % 60;
+    const timeLeft = rh > 0 ? `${rh}h ${rm}m left` : `${rm}m left`;
+    return { status: 'live', label: `On air \u2014 ${timeLeft}`, sortKey: -1000 + nowMin - startMin };
+  }
+
+  // Upcoming today
+  let minsUntil = startMin - nowMin;
+  if (minsUntil < 0) minsUntil += 1440; // past for today, would be tomorrow
+  if (minsUntil < 0 || minsUntil > 1440) {
+    return { status: 'today', label: `${parts[0].padStart(2,'0')}:${(parts[1]||'00').padStart(2,'0')} UTC`, sortKey: minsUntil };
+  }
+  if (minsUntil <= 60) {
+    return { status: 'soon', label: `in ${minsUntil}m`, sortKey: minsUntil };
+  }
+  const h = Math.floor(minsUntil / 60);
+  const m = minsUntil % 60;
+  const timeStr = m > 0 ? `in ${h}h ${m}m` : `in ${h}h`;
+  return { status: minsUntil <= 120 ? 'soon' : 'today', label: timeStr, sortKey: minsUntil };
+}
+
+function getSwlCountdown(entry) {
+  if (!entry.startTimeUtc || !entry.endTimeUtc) return { status: 'off', label: '', sortKey: 9999 };
+  const now = new Date();
+  const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const sp = entry.startTimeUtc.split(':');
+  const ep = entry.endTimeUtc.split(':');
+  const startMin = parseInt(sp[0], 10) * 60 + parseInt(sp[1] || '0', 10);
+  let endMin = parseInt(ep[0], 10) * 60 + parseInt(ep[1] || '0', 10);
+  if (entry.endTimeUtc === '24:00') endMin = 1440;
+
+  let onAir;
+  if (endMin <= startMin) {
+    onAir = nowMin >= startMin || nowMin < endMin;
+  } else {
+    onAir = nowMin >= startMin && nowMin < endMin;
+  }
+
+  if (onAir) {
+    const effEnd = endMin <= startMin && nowMin < endMin ? endMin : endMin;
+    const remaining = effEnd > nowMin ? effEnd - nowMin : effEnd + 1440 - nowMin;
+    const rh = Math.floor(remaining / 60);
+    const rm = remaining % 60;
+    const timeLeft = rh > 0 ? `${rh}h ${rm}m left` : `${rm}m left`;
+    return { status: 'live', label: `On air \u2014 ${timeLeft}`, sortKey: -1000 };
+  }
+
+  let minsUntil = startMin - nowMin;
+  if (minsUntil < 0) minsUntil += 1440;
+  if (minsUntil <= 60) return { status: 'soon', label: `in ${minsUntil}m`, sortKey: minsUntil };
+  const h = Math.floor(minsUntil / 60);
+  const m = minsUntil % 60;
+  const timeStr = m > 0 ? `in ${h}h ${m}m` : `in ${h}h`;
+  return { status: minsUntil <= 120 ? 'soon' : 'today', label: timeStr, sortKey: minsUntil };
+}
+
+let dirvInited = false;
+function renderDirectoryView() {
+  if (!directoryView || directoryView.classList.contains('hidden')) return;
+  const search = (dirvSearch ? dirvSearch.value : '').toLowerCase().trim();
+  const bandFilter = dirvBandFilter ? dirvBandFilter.value : 'all';
+  const statusFilter = dirvStatusFilter ? dirvStatusFilter.value : 'all';
+
+  if (dirvActiveTab === 'nets') {
+    renderDirvNets(search, bandFilter, statusFilter);
+    const table = dirvNetsContainer?.querySelector('.directory-view-table');
+    if (table) {
+      initDirvColumnResizing(table);
+      applyDirvHiddenCols(table);
+      if (!table._dirvMenuInited) { initDirvHeaderMenu(table); table._dirvMenuInited = true; }
+    }
+  } else {
+    renderDirvSwl(search, bandFilter, statusFilter);
+    const table = dirvSwlContainer?.querySelector('.directory-view-table');
+    if (table) {
+      initDirvColumnResizing(table);
+      applyDirvHiddenCols(table);
+      if (!table._dirvMenuInited) { initDirvHeaderMenu(table); table._dirvMenuInited = true; }
+    }
+  }
+}
+
+function renderDirvNets(search, bandFilter, statusFilter) {
+  if (!dirvNetsBody) return;
+  dirvNetsBody.innerHTML = '';
+  // Merge community directory nets + user custom nets
+  let entries = [];
+  // Community nets
+  for (const net of directoryNets) {
+    const band = freqToBandDir(net.frequency);
+    const cd = getNetCountdown(net);
+    entries.push({ ...net, band, _cd: cd, _src: 'community' });
+  }
+  // User custom net reminders
+  for (const nr of currentNetReminders) {
+    // Skip if it matches a community net (avoid duplicates)
+    const isDup = directoryNets.some(d => d.name === nr.name && String(d.frequency) === String(nr.frequency));
+    if (isDup) continue;
+    const band = freqToBandDir(nr.frequency);
+    // Build a fake directory entry from the reminder
+    const days = nr.schedule?.type === 'daily' ? 'Daily' :
+      nr.schedule?.type === 'weekly' ? (nr.schedule.days || []).map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join(',') : 'Custom';
+    const fakeNet = {
+      name: nr.name, frequency: nr.frequency, mode: nr.mode || 'SSB',
+      days, startTimeUtc: nr.startTime, duration: nr.duration || 60,
+      region: '', notes: '(My Net)', band,
+      _cd: getNetCountdown({ startTimeUtc: nr.startTime, days, duration: nr.duration || 60 }),
+      _src: 'user', _netId: nr.id
+    };
+    entries.push(fakeNet);
+  }
+
+  // Filter
+  if (search) {
+    entries = entries.filter(n =>
+      (n.name || '').toLowerCase().includes(search) ||
+      (n.region || '').toLowerCase().includes(search) ||
+      (n.notes || '').toLowerCase().includes(search) ||
+      (n.mode || '').toLowerCase().includes(search) ||
+      String(n.frequency).includes(search)
+    );
+  }
+  if (bandFilter !== 'all') {
+    entries = entries.filter(n => n.band === bandFilter);
+  }
+  if (statusFilter === 'live') {
+    entries = entries.filter(n => n._cd.status === 'live');
+  } else if (statusFilter === 'today') {
+    entries = entries.filter(n => n._cd.status !== 'off');
+  }
+
+  // Sort: live first, then soon, then today by countdown, then off alphabetically
+  entries.sort((a, b) => {
+    if (a._cd.sortKey !== b._cd.sortKey) return a._cd.sortKey - b._cd.sortKey;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
+  if (dirvCount) dirvCount.textContent = `${entries.length} net${entries.length !== 1 ? 's' : ''}`;
+
+  if (entries.length === 0) {
+    if (dirvPlaceholder) {
+      dirvPlaceholder.textContent = directoryNets.length === 0 ? 'Loading directory data...' : 'No matching nets found.';
+      dirvPlaceholder.classList.remove('hidden');
+    }
+    return;
+  }
+  if (dirvPlaceholder) dirvPlaceholder.classList.add('hidden');
+
+  const lsbBands = new Set(['160m', '80m', '60m', '40m']);
+
+  for (const net of entries) {
+    const tr = document.createElement('tr');
+    const cd = net._cd;
+    if (cd.status === 'live') tr.classList.add('dirv-on-air');
+    else if (cd.status === 'soon') tr.classList.add('dirv-upcoming');
+
+    const statusBadge = cd.status === 'live' ? '<span class="dirv-status-badge live">Live</span>'
+      : cd.status === 'soon' ? '<span class="dirv-status-badge soon">Soon</span>'
+      : cd.status === 'today' ? '<span class="dirv-status-badge today">Today</span>'
+      : '<span class="dirv-status-badge off">\u2014</span>';
+
+    const nextLabel = cd.label
+      ? `<span class="dirv-next-countdown${cd.status === 'live' ? ' live' : ''}">${esc(cd.label)}</span>`
+      : '\u2014';
+
+    const duration = net.duration ? `${net.duration}m` : '';
+    const alreadyAdded = net._src === 'user' || currentNetReminders.some(r =>
+      r.name === net.name && String(r.frequency) === String(net.frequency)
+    );
+    const actionCell = alreadyAdded
+      ? '<span class="dir-added-label">\u2713</span>'
+      : '<button class="dir-add-btn" type="button">+ Add</button>';
+
+    tr.innerHTML = `<td class="dirv-status-col">${statusBadge}</td>`
+      + `<td class="dirv-name-col">${esc(net.name)}</td>`
+      + `<td class="dirv-freq-col">${net.frequency || ''}</td>`
+      + `<td class="dirv-mode-col">${esc(net.mode)}</td>`
+      + `<td class="dirv-band-col">${esc(net.band)}</td>`
+      + `<td class="dirv-days-col">${esc(net.days)}</td>`
+      + `<td class="dirv-time-col">${esc(net.startTimeUtc)}</td>`
+      + `<td class="dirv-next-col">${nextLabel}</td>`
+      + `<td class="dirv-dur-col">${duration}</td>`
+      + `<td class="dirv-region-col">${esc(net.region)}</td>`
+      + `<td class="dirv-notes-col">${esc(net.notes)}</td>`
+      + `<td class="dirv-action-col">${actionCell}</td>`;
+
+    // Click row to tune
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.dir-add-btn')) return; // don't tune on Add click
+      const freq = String(net.frequency);
+      if (!freq) return;
+      let mode = (net.mode || '').toUpperCase();
+      if (mode === 'SSB') {
+        const band = net.band;
+        mode = lsbBands.has(band) ? 'LSB' : 'USB';
+      }
+      window.api.tune(freq, mode);
+    });
+
+    // Hover popup
+    attachDirHover(tr, [
+      { label: 'Net', value: net.name },
+      { label: 'Frequency', value: net.frequency ? `${net.frequency} kHz` : '' },
+      { label: 'Mode', value: net.mode },
+      { label: 'Schedule', value: `${net.days || 'Daily'} at ${net.startTimeUtc || '?'} UTC` },
+      { label: 'Duration', value: duration },
+      { label: 'Region', value: net.region },
+      { label: 'Notes', value: net.notes },
+    ]);
+
+    // Add button
+    const addBtn = tr.querySelector('.dir-add-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        addDirectoryNetToReminders(net);
+        renderDirectoryView();
+        renderNetList(currentNetReminders);
+      });
+    }
+
+    dirvNetsBody.appendChild(tr);
+  }
+}
+
+function renderDirvSwl(search, bandFilter, statusFilter) {
+  if (!dirvSwlBody) return;
+  dirvSwlBody.innerHTML = '';
+  let entries = [];
+  for (const entry of directorySwl) {
+    const band = freqToBandDir(entry.frequency);
+    const cd = getSwlCountdown(entry);
+    entries.push({ ...entry, band, _cd: cd });
+  }
+
+  if (search) {
+    entries = entries.filter(e =>
+      (e.station || '').toLowerCase().includes(search) ||
+      (e.language || '').toLowerCase().includes(search) ||
+      (e.regionTarget || '').toLowerCase().includes(search) ||
+      (e.notes || '').toLowerCase().includes(search) ||
+      String(e.frequency).includes(search)
+    );
+  }
+  if (bandFilter !== 'all') {
+    entries = entries.filter(e => e.band === bandFilter);
+  }
+  if (statusFilter === 'live') {
+    entries = entries.filter(e => e._cd.status === 'live');
+  } else if (statusFilter === 'today') {
+    entries = entries.filter(e => e._cd.status !== 'off');
+  }
+
+  entries.sort((a, b) => {
+    if (a._cd.sortKey !== b._cd.sortKey) return a._cd.sortKey - b._cd.sortKey;
+    return (a.station || '').localeCompare(b.station || '');
+  });
+
+  if (dirvCount) dirvCount.textContent = `${entries.length} broadcast${entries.length !== 1 ? 's' : ''}`;
+
+  if (entries.length === 0) {
+    if (dirvPlaceholder) {
+      dirvPlaceholder.textContent = directorySwl.length === 0 ? 'Loading directory data...' : 'No matching broadcasts found.';
+      dirvPlaceholder.classList.remove('hidden');
+    }
+    return;
+  }
+  if (dirvPlaceholder) dirvPlaceholder.classList.add('hidden');
+
+  for (const entry of entries) {
+    const tr = document.createElement('tr');
+    const cd = entry._cd;
+    if (cd.status === 'live') tr.classList.add('dirv-on-air');
+    else if (cd.status === 'soon') tr.classList.add('dirv-upcoming');
+
+    const statusBadge = cd.status === 'live' ? '<span class="dirv-status-badge live">Live</span>'
+      : cd.status === 'soon' ? '<span class="dirv-status-badge soon">Soon</span>'
+      : cd.status === 'today' ? '<span class="dirv-status-badge today">Today</span>'
+      : '<span class="dirv-status-badge off">\u2014</span>';
+
+    const nextLabel = cd.label
+      ? `<span class="dirv-next-countdown${cd.status === 'live' ? ' live' : ''}">${esc(cd.label)}</span>`
+      : '\u2014';
+
+    const powerStr = entry.powerKw ? `${entry.powerKw} kW` : '';
+
+    tr.innerHTML = `<td class="dirv-status-col">${statusBadge}</td>`
+      + `<td class="dirv-name-col">${esc(entry.station)}</td>`
+      + `<td class="dirv-freq-col">${entry.frequency || ''}</td>`
+      + `<td class="dirv-mode-col">${esc(entry.mode)}</td>`
+      + `<td class="dirv-band-col">${esc(entry.band)}</td>`
+      + `<td class="dirv-time-col">${esc(entry.startTimeUtc)}</td>`
+      + `<td class="dirv-time-col">${esc(entry.endTimeUtc)}</td>`
+      + `<td class="dirv-next-col">${nextLabel}</td>`
+      + `<td class="dirv-lang-col">${esc(entry.language)}</td>`
+      + `<td class="dirv-power-col">${powerStr}</td>`
+      + `<td class="dirv-region-col">${esc(entry.regionTarget)}</td>`
+      + `<td class="dirv-notes-col">${esc(entry.notes)}</td>`;
+
+    // Click row to tune
+    tr.addEventListener('click', () => {
+      const freq = String(entry.frequency);
+      if (!freq) return;
+      window.api.tune(freq, (entry.mode || 'AM').toUpperCase());
+    });
+
+    attachDirHover(tr, [
+      { label: 'Station', value: entry.station },
+      { label: 'Frequency', value: entry.frequency ? `${entry.frequency} kHz` : '' },
+      { label: 'Mode', value: entry.mode },
+      { label: 'Schedule', value: `${entry.startTimeUtc || '?'} \u2013 ${entry.endTimeUtc || '?'} UTC` },
+      { label: 'Language', value: entry.language },
+      { label: 'Power', value: powerStr },
+      { label: 'Target', value: entry.regionTarget },
+      { label: 'Notes', value: entry.notes },
+    ]);
+
+    dirvSwlBody.appendChild(tr);
+  }
+}
+
+// Auto-refresh countdowns every 30s while directory view is open
+function startDirvAutoRefresh() {
+  stopDirvAutoRefresh();
+  dirvAutoRefreshTimer = setInterval(() => {
+    if (currentView === 'directory') renderDirectoryView();
+  }, 30000);
+}
+function stopDirvAutoRefresh() {
+  if (dirvAutoRefreshTimer) { clearInterval(dirvAutoRefreshTimer); dirvAutoRefreshTimer = null; }
+}
+
+// --- Directory View: Column Resize & Visibility ---
+const DIRV_COL_KEY = 'dirv-col-widths';
+const DIRV_HIDDEN_KEY = 'dirv-hidden-cols';
+
+const DIRV_NETS_COLS = ['status','name','freq','mode','band','days','time','next','dur','region','notes','action'];
+const DIRV_SWL_COLS = ['status','name','freq','mode','band','startTime','endTime','next','lang','power','region','notes'];
+
+const DIRV_DEFAULT_WIDTHS = {
+  status: 70, name: 0, freq: 90, mode: 50, band: 50, days: 100,
+  time: 80, next: 90, dur: 40, region: 110, notes: 0, action: 60,
+  startTime: 80, endTime: 80, lang: 60, power: 60
+};
+
+function loadDirvColWidths() {
+  try { const s = JSON.parse(localStorage.getItem(DIRV_COL_KEY)); if (s) return s; } catch {}
+  return {};
+}
+function saveDirvColWidths(w) { localStorage.setItem(DIRV_COL_KEY, JSON.stringify(w)); }
+function loadDirvHiddenCols() {
+  try { const s = JSON.parse(localStorage.getItem(DIRV_HIDDEN_KEY)); if (Array.isArray(s)) return new Set(s); } catch {}
+  return new Set();
+}
+function saveDirvHiddenCols(s) { localStorage.setItem(DIRV_HIDDEN_KEY, JSON.stringify([...s])); }
+
+let dirvColWidths = loadDirvColWidths();
+let dirvHiddenCols = loadDirvHiddenCols();
+
+function initDirvColumnResizing(table) {
+  if (!table) return;
+  const ths = table.querySelectorAll('thead th');
+  ths.forEach(th => {
+    // Remove any old handle
+    const old = th.querySelector('.col-resize-handle');
+    if (old) old.remove();
+
+    const col = th.dataset.dirCol;
+    if (!col) return;
+
+    // Apply saved width
+    if (dirvColWidths[col]) th.style.width = dirvColWidths[col] + 'px';
+
+    // Apply hidden state
+    th.classList.toggle('dirv-col-hidden', dirvHiddenCols.has(col));
+
+    const handle = document.createElement('div');
+    handle.className = 'col-resize-handle';
+    th.style.position = 'relative';
+    th.appendChild(handle);
+
+    handle.addEventListener('dragstart', (e) => e.preventDefault());
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startW = th.offsetWidth;
+      document.body.style.cursor = 'col-resize';
+
+      const onMove = (ev) => {
+        const w = Math.max(30, startW + ev.clientX - startX);
+        th.style.width = w + 'px';
+        dirvColWidths[col] = w;
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = '';
+        saveDirvColWidths(dirvColWidths);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+}
+
+function applyDirvHiddenCols(table) {
+  if (!table) return;
+  const ths = table.querySelectorAll('thead th');
+  const colIndices = new Map();
+  ths.forEach((th, i) => {
+    const col = th.dataset.dirCol;
+    if (!col) return;
+    const hidden = dirvHiddenCols.has(col);
+    th.classList.toggle('dirv-col-hidden', hidden);
+    colIndices.set(i, hidden);
+  });
+  table.querySelectorAll('tbody tr').forEach(tr => {
+    const tds = tr.querySelectorAll('td');
+    colIndices.forEach((hidden, i) => {
+      if (tds[i]) tds[i].classList.toggle('dirv-col-hidden', hidden);
+    });
+  });
+}
+
+// Right-click context menu on header to toggle columns
+let dirvColMenu = null;
+function showDirvColMenu(e, table) {
+  e.preventDefault();
+  closeDirvColMenu();
+  const ths = table.querySelectorAll('thead th[data-dir-col]');
+  const menu = document.createElement('div');
+  menu.className = 'dirv-col-menu';
+  menu.style.left = e.clientX + 'px';
+  menu.style.top = e.clientY + 'px';
+
+  ths.forEach(th => {
+    const col = th.dataset.dirCol;
+    const label = th.textContent.replace(/\s+/g, ' ').trim();
+    if (!col || !label) return;
+    const item = document.createElement('label');
+    item.className = 'dirv-col-menu-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !dirvHiddenCols.has(col);
+    cb.addEventListener('change', () => {
+      if (cb.checked) dirvHiddenCols.delete(col);
+      else dirvHiddenCols.add(col);
+      saveDirvHiddenCols(dirvHiddenCols);
+      applyDirvHiddenCols(table);
+    });
+    item.appendChild(cb);
+    item.appendChild(document.createTextNode(' ' + label));
+    menu.appendChild(item);
+  });
+
+  document.body.appendChild(menu);
+  dirvColMenu = menu;
+  // Keep within viewport
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 4) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 4) + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click', closeDirvColMenu, { once: true });
+  }, 0);
+}
+function closeDirvColMenu() {
+  if (dirvColMenu) { dirvColMenu.remove(); dirvColMenu = null; }
+}
+
+// Attach context menu to both directory tables
+function initDirvHeaderMenu(table) {
+  if (!table) return;
+  const thead = table.querySelector('thead');
+  if (thead) thead.addEventListener('contextmenu', (e) => showDirvColMenu(e, table));
+}
+
+// Directory view tab switching
+if (dirvTabNets) dirvTabNets.addEventListener('click', () => {
+  dirvActiveTab = 'nets';
+  dirvTabNets.classList.add('active');
+  dirvTabSwl.classList.remove('active');
+  dirvNetsContainer.classList.remove('hidden');
+  dirvSwlContainer.classList.add('hidden');
+  renderDirectoryView();
+});
+if (dirvTabSwl) dirvTabSwl.addEventListener('click', () => {
+  dirvActiveTab = 'swl';
+  dirvTabSwl.classList.add('active');
+  dirvTabNets.classList.remove('active');
+  dirvSwlContainer.classList.remove('hidden');
+  dirvNetsContainer.classList.add('hidden');
+  renderDirectoryView();
+});
+
+// Directory view filters
+if (dirvSearch) dirvSearch.addEventListener('input', () => renderDirectoryView());
+if (dirvBandFilter) dirvBandFilter.addEventListener('change', () => renderDirectoryView());
+if (dirvStatusFilter) dirvStatusFilter.addEventListener('change', () => renderDirectoryView());
+if (dirvRefreshBtn) dirvRefreshBtn.addEventListener('click', () => { window.api.fetchDirectory(); });
+if (dirvSuggestSheet) dirvSuggestSheet.addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openExternal(DIR_SHEET_URL);
+});
+
+function updateDirectoryButton() {
+  if (!viewDirectoryBtn) return;
+  // Show when directory is enabled, OR user has custom net reminders
+  const show = setEnableDirectory?.checked || (currentNetReminders && currentNetReminders.length > 0);
+  viewDirectoryBtn.classList.toggle('hidden', !show);
+  if (!show && currentView === 'directory') setView('table');
+}
+
 function renderDirectory() {
   if (!dirBrowser || dirBrowser.classList.contains('hidden')) return;
   const search = (dirSearchInput.value || '').toLowerCase().trim();
@@ -7837,14 +8452,13 @@ if (setEnableDirectory) setEnableDirectory.addEventListener('change', () => {
   }
 });
 
-// Browse / close directory browser
+// Browse / close directory browser — now opens the full Directory View
 if (dirBrowseBtn) dirBrowseBtn.addEventListener('click', () => {
-  dirBrowser.classList.remove('hidden');
-  dirBrowseBtn.classList.add('hidden');
   if (directoryNets.length === 0 && directorySwl.length === 0) {
     window.api.fetchDirectory();
   }
-  renderDirectory();
+  settingsDialog.close();
+  setView('directory');
 });
 if (dirCloseBtn) dirCloseBtn.addEventListener('click', () => {
   dirBrowser.classList.add('hidden');
@@ -7856,6 +8470,7 @@ window.api.onDirectoryData((data) => {
   directoryNets = data.nets || [];
   directorySwl = data.swl || [];
   renderDirectory();
+  renderDirectoryView();
 });
 
 // --- Worked parks listener ---

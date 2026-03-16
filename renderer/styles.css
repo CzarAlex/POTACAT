@@ -4663,6 +4663,245 @@ body.activator-rbn-on #rbn-view {
   font-size: 13px;
 }
 
+/* =============================================
+   Directory View — full-width HF Nets & SWL
+   ============================================= */
+
+#directory-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.directory-view-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.directory-view-header .directory-tabs {
+  flex-shrink: 0;
+}
+
+.directory-view-header .directory-search {
+  width: 200px;
+}
+
+.dirv-filter-select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.dirv-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+.directory-view-table-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.directory-view-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.directory-view-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.directory-view-table tbody tr {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.directory-view-table tbody tr:hover {
+  background: rgba(79, 195, 247, 0.15);
+}
+
+.directory-view-table tbody tr.dirv-on-air {
+  background: rgba(78, 204, 163, 0.12);
+  border-left: 3px solid var(--accent-green, #4ecca3);
+}
+
+.directory-view-table tbody tr.dirv-on-air:hover {
+  background: rgba(78, 204, 163, 0.22);
+}
+
+.directory-view-table tbody tr.dirv-upcoming {
+  background: rgba(240, 165, 0, 0.10);
+  border-left: 3px solid var(--accent-orange, #f0a500);
+}
+
+.directory-view-table tbody tr.dirv-upcoming:hover {
+  background: rgba(240, 165, 0, 0.18);
+}
+
+/* Light mode: stronger contrast for highlighted rows */
+.light-mode .directory-view-table tbody tr:hover {
+  background: rgba(33, 150, 243, 0.12);
+}
+
+.light-mode .directory-view-table tbody tr.dirv-on-air {
+  background: rgba(46, 125, 50, 0.12);
+}
+
+.light-mode .directory-view-table tbody tr.dirv-on-air:hover {
+  background: rgba(46, 125, 50, 0.20);
+}
+
+.light-mode .directory-view-table tbody tr.dirv-upcoming {
+  background: rgba(230, 126, 0, 0.12);
+}
+
+.light-mode .directory-view-table tbody tr.dirv-upcoming:hover {
+  background: rgba(230, 126, 0, 0.20);
+}
+
+.directory-view-table tbody td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dirv-status-col { width: 70px; }
+.dirv-name-col { min-width: 160px; }
+.dirv-freq-col { width: 90px; }
+.dirv-mode-col { width: 50px; }
+.dirv-band-col { width: 50px; }
+.dirv-days-col { width: 100px; }
+.dirv-time-col { width: 80px; }
+.dirv-next-col { width: 90px; }
+.dirv-dur-col { width: 40px; }
+.dirv-lang-col { width: 60px; }
+.dirv-power-col { width: 60px; }
+.dirv-region-col { width: 110px; }
+.dirv-notes-col { min-width: 120px; max-width: 300px; }
+.dirv-action-col { width: 60px; text-align: center; }
+
+.dirv-status-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.dirv-status-badge.live {
+  background: var(--accent-green, #4ecca3);
+  color: #000;
+}
+
+.dirv-status-badge.soon {
+  background: var(--accent-orange, #f0a500);
+  color: #000;
+}
+
+.dirv-status-badge.today {
+  background: var(--bg-tertiary, #333);
+  color: var(--text-secondary);
+}
+
+.dirv-status-badge.off {
+  color: var(--text-tertiary);
+}
+
+.dirv-next-countdown {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.dirv-next-countdown.live {
+  color: var(--accent-green, #4ecca3);
+  font-weight: 600;
+}
+
+.dirv-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+
+.dirv-hint {
+  font-style: italic;
+}
+
+/* Hidden columns */
+.dirv-col-hidden {
+  display: none !important;
+}
+
+/* Right-click column visibility menu */
+.dirv-col-menu {
+  position: fixed;
+  z-index: 10002;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  padding: 6px 0;
+  min-width: 160px;
+  box-shadow: 0 4px 16px var(--shadow-heavy);
+}
+
+.dirv-col-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  margin: 0;
+}
+
+.dirv-col-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.dirv-col-menu-item input[type="checkbox"] {
+  margin: 0;
+}
+
+#dirv-placeholder {
+  padding: 48px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 /* Settings radio labels */
 .radio-label { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 
