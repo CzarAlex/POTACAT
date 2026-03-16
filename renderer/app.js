@@ -786,6 +786,8 @@ async function loadPrefs() {
   enablePskrMap = settings.enablePskrMap === true; // default false
   enableDxe = settings.enableDxe !== false; // default true
   enableSolar = settings.enableSolar === true;   // default false
+  // PSTRotator — mark as configured so quick-toggle is visible on first dropdown open
+  if (settings.enableRotor) rotorConfigured = true;
   // Color rows — default true (on)
   spotsTable.classList.toggle('no-source-tint', settings.colorRows === false);
   enableBandActivity = settings.enableBandActivity === true; // default false
