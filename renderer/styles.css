@@ -2626,6 +2626,30 @@ dialog input, dialog select {
   border-radius: 50%;
 }
 
+/* Propagation view source toggles */
+.prop-source-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.prop-source-toggle input[type="checkbox"] {
+  margin: 0;
+}
+
+/* Source indicator in propagation table */
+.prop-source-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
 /* QSO Logging */
 .log-col {
   display: none;

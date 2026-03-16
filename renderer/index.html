@@ -150,7 +150,7 @@
         <button id="view-table-btn" class="view-btn active" title="Table view">Table</button>
         <button id="view-map-btn" class="view-btn" title="Map view">Map</button>
         <button id="popout-map-btn" class="view-btn popout-btn" title="Pop-out map window">&#x2197;</button>
-        <button id="view-rbn-btn" class="view-btn hidden" title="Reverse Beacon Network">RBN</button>
+        <button id="view-rbn-btn" class="view-btn hidden" title="Propagation — RBN &amp; PSKReporter">Propagation</button>
         <button id="cluster-terminal-btn" class="view-btn hidden" title="DX Cluster Terminal">Terminal</button>
         <button id="view-directory-btn" class="view-btn hidden" title="HF Nets &amp; SWL Broadcast Directory">Directory</button>
         <button id="view-jtcat-btn" class="view-btn hidden" title="JTCAT — FT8/FT4 Digital Modes">JTCAT</button>
@@ -279,7 +279,7 @@
         <button id="activator-map-btn" class="act-btn-group-item" title="Open activation map">Map</button>
         <button id="activator-spots-btn" class="act-btn-group-item" title="Show/hide hunter spots">Spots</button>
         <button id="activator-spots-popout-btn" class="act-btn-group-item act-btn-group-narrow" title="Pop out spots window">&#x2197;</button>
-        <button id="activator-rbn-btn" class="act-btn-group-item hidden" title="Show/hide Reverse Beacon Network">RBN</button>
+        <button id="activator-rbn-btn" class="act-btn-group-item hidden" title="Show/hide Propagation (RBN + PSKReporter)">Prop</button>
       </div>
       <button id="activator-history-btn" class="activator-history-btn" title="Past Activations">Past</button>
       <span id="activator-timer" class="activator-timer" title="Activation duration">--:--</span>
@@ -712,6 +712,8 @@
     </div>
     <div id="rbn-view" class="hidden">
       <div class="rbn-header">
+        <label class="prop-source-toggle"><input type="checkbox" id="prop-show-rbn" checked> <span style="color:var(--source-rbn)">RBN</span></label>
+        <label class="prop-source-toggle"><input type="checkbox" id="prop-show-pskr" checked> <span style="color:#ff6b6b">PSKReporter</span></label>
         <div class="multi-dropdown" id="rbn-band-filter">
           <button class="multi-dropdown-btn" type="button">Band: <span class="multi-dropdown-text">All</span></button>
           <div class="multi-dropdown-menu">
@@ -729,6 +731,19 @@
             <label class="multi-dropdown-item"><input type="checkbox" value="6m"> 6m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="2m"> 2m</label>
             <label class="multi-dropdown-item"><input type="checkbox" value="70cm"> 70cm</label>
+          </div>
+        </div>
+        <div class="multi-dropdown" id="prop-mode-filter">
+          <button class="multi-dropdown-btn" type="button">Mode: <span class="multi-dropdown-text">All</span></button>
+          <div class="multi-dropdown-menu">
+            <label class="multi-dropdown-item"><input type="checkbox" value="all" checked> All</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="CW"> CW</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="FT8"> FT8</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="FT4"> FT4</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="FT2"> FT2</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="JS8"> JS8</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="FREEDV"> FreeDV</label>
+            <label class="multi-dropdown-item"><input type="checkbox" value="RTTY"> RTTY</label>
           </div>
         </div>
         <label class="rbn-age-filter">Max age:
@@ -750,14 +765,12 @@
         <table id="rbn-table">
           <thead>
             <tr>
-              <th>Spotter</th>
-              <th>Spotted</th>
+              <th>Station</th>
+              <th>Location</th>
               <th id="rbn-dist-header">Dist (mi)</th>
               <th>Freq</th>
               <th>Mode</th>
-              <th>Type</th>
               <th>SNR</th>
-              <th>Speed</th>
               <th>Time</th>
               <th>Seen</th>
             </tr>
@@ -791,6 +804,7 @@
       <span id="conn-cluster" class="conn-pill hidden"><span class="conn-dot"></span> DX Cluster</span>
       <span id="conn-rbn" class="conn-pill hidden"><span class="conn-dot"></span> RBN</span>
       <span id="conn-pskr" class="conn-pill hidden"><span class="conn-dot"></span> FreeDV</span>
+      <span id="conn-pskr-map" class="conn-pill hidden"><span class="conn-dot"></span> PSKReporter</span>
       <span id="conn-remote" class="conn-pill hidden"><span class="conn-dot"></span> Echo CAT</span>
     </div>
     <!-- Settings tab bar -->
@@ -1070,7 +1084,7 @@
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-rbn"> Reverse Beacon Network</label>
       <div id="rbn-config" class="radio-sub hidden">
-        <span class="help-text" style="font-size:12px;">Shows where your CQ calls are being heard by RBN skimmers worldwide.</span>
+        <span class="help-text" style="font-size:12px;">Shows where your CQ calls are being heard by RBN skimmers worldwide. Appears in the Propagation view.</span>
         <span class="help-text" style="display:block;margin-top:4px;">RBN spots only appear while POTACAT is open — historical spots are not retrieved.</span>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="set-enable-wsjtx"> WSJT-X Integration</label>
@@ -1087,6 +1101,11 @@
       <label class="checkbox-label"><input type="checkbox" id="set-enable-pskr"> FreeDV (PSKReporter)</label>
       <div id="pskr-config" class="radio-sub hidden">
         <span class="help-text" style="margin-left:12px;display:block;">Live FreeDV reception reports from PSKReporter. Shows who is hearing FreeDV signals worldwide.</span>
+      </div>
+      <label class="checkbox-label"><input type="checkbox" id="set-enable-pskr-map"> PSKReporter Propagation</label>
+      <div id="pskr-map-config" class="radio-sub hidden">
+        <span class="help-text" style="margin-left:12px;display:block;">Shows where your FT8/FT4/CW transmissions are being received worldwide. Appears in the Propagation view alongside RBN.</span>
+        <span class="help-text" style="display:block;margin-top:4px;">Polls every 5 minutes (PSKReporter rate limit). Spots appear after the first poll completes. Requires your callsign above.</span>
       </div>
     </fieldset>
     <!-- 4. Spot Filters (merged Spots + Watchlist) -->

@@ -108,6 +108,9 @@ const DIRECTORY_CACHE_PATH = path.join(app.getPath('userData'), 'directory-cache
 let pskr = null;
 let pskrSpots = [];       // streaming PSKReporter FreeDV spots (FIFO, max 500)
 let pskrFlushTimer = null; // throttle timer for PSKReporter → renderer updates
+let pskrMap = null;            // PskrClient for dedicated PSKReporter Map view
+let pskrMapSpots = [];         // receiver spots for PSKReporter Map (FIFO, max 500)
+let pskrMapFlushTimer = null;  // throttle timer for PSKReporter Map → renderer
 let keyer = null;          // IambicKeyer instance for CW MIDI keying
 let remoteServer = null;   // RemoteServer instance for phone remote access
 let cwKeyPort = null;      // Dedicated SerialPort for DTR CW keying (external USB-serial adapter)
@@ -1112,6 +1115,131 @@ function disconnectPskr() {
   }
   pskrSpots = [];
   sendPskrStatus({ connected: false });
+}
+
+// --- PSKReporter Map view ---
+function sendPskrMapStatus(s) {
+  if (win && !win.isDestroyed()) win.webContents.send('pskr-map-status', s);
+}
+
+function sendPskrMapSpots() {
+  if (win && !win.isDestroyed()) win.webContents.send('pskr-map-spots', pskrMapSpots);
+}
+
+function connectPskrMap() {
+  if (pskrMap) {
+    pskrMap.disconnect();
+    pskrMap.removeAllListeners();
+    pskrMap = null;
+  }
+  pskrMapSpots = [];
+
+  if (!settings.enablePskrMap || !settings.myCallsign) {
+    sendPskrMapStatus({ connected: false });
+    return;
+  }
+
+  pskrMap = new PskrClient();
+  const myPos = gridToLatLon(settings.grid);
+  const myCall = settings.myCallsign.toUpperCase();
+
+  pskrMap.on('spot', (raw) => {
+    // Only keep spots where WE are the sender
+    if (raw.callsign.toUpperCase() !== myCall) return;
+
+    // Resolve receiver location: prefer receiverGrid, fallback to cty.dat
+    let lat = null, lon = null, locationDesc = '';
+    if (raw.receiverGrid && raw.receiverGrid.length >= 4) {
+      const pos = gridToLatLon(raw.receiverGrid);
+      if (pos) { lat = pos.lat; lon = pos.lon; }
+    }
+    if (ctyDb) {
+      const entity = resolveCallsign(raw.spotter, ctyDb);
+      if (entity) {
+        locationDesc = entity.name;
+        if (lat == null && entity.lat != null && entity.lon != null) {
+          lat = entity.lat;
+          lon = entity.lon;
+        }
+      }
+    }
+
+    let distance = null, bear = null;
+    if (myPos && lat != null && lon != null) {
+      distance = Math.round(haversineDistanceMiles(myPos.lat, myPos.lon, lat, lon));
+      bear = Math.round(bearing(myPos.lat, myPos.lon, lat, lon));
+    }
+
+    const spot = {
+      receiver: raw.spotter,
+      callsign: raw.callsign,
+      frequency: raw.frequency,
+      freqMHz: raw.freqMHz,
+      mode: raw.mode,
+      band: raw.band,
+      snr: raw.snr,
+      spotTime: raw.spotTime,
+      lat, lon,
+      locationDesc,
+      distance,
+      bearing: bear,
+      receiverGrid: raw.receiverGrid || '',
+    };
+
+    // Dedupe: keep latest per receiver+band
+    const idx = pskrMapSpots.findIndex(s => s.receiver === spot.receiver && s.band === spot.band);
+    if (idx !== -1) pskrMapSpots.splice(idx, 1);
+    pskrMapSpots.push(spot);
+    if (pskrMapSpots.length > 500) {
+      pskrMapSpots = pskrMapSpots.slice(-500);
+    }
+
+    // Throttle: flush to renderer at most once every 2s
+    if (!pskrMapFlushTimer) {
+      pskrMapFlushTimer = setTimeout(() => {
+        pskrMapFlushTimer = null;
+        sendPskrMapSpots();
+      }, 2000);
+    }
+  });
+
+  pskrMap.on('status', (s) => {
+    sendPskrMapStatus({ ...s, spotCount: pskrMapSpots.length, nextPollAt: pskrMap.nextPollAt });
+    if (s.connected && pskrMapSpots.length > 0) {
+      if (pskrMapFlushTimer) { clearTimeout(pskrMapFlushTimer); pskrMapFlushTimer = null; }
+      sendPskrMapSpots();
+    }
+  });
+
+  pskrMap.on('pollDone', () => {
+    sendPskrMapStatus({ connected: pskrMap.connected, nextPollAt: pskrMap.nextPollAt, spotCount: pskrMapSpots.length, pollUpdate: true });
+  });
+
+  pskrMap.on('log', (msg) => {
+    sendCatLog(`[PSKRMap] ${msg}`);
+  });
+
+  pskrMap.on('error', (msg) => {
+    console.error(msg);
+    sendCatLog(`[PSKRMap] ${msg}`);
+    sendPskrMapStatus({ connected: false, error: msg });
+  });
+
+  pskrMap.connect({ senderCallsign: myCall });
+}
+
+function disconnectPskrMap() {
+  if (pskrMapFlushTimer) {
+    clearTimeout(pskrMapFlushTimer);
+    pskrMapFlushTimer = null;
+  }
+  if (pskrMap) {
+    pskrMap.disconnect();
+    pskrMap.removeAllListeners();
+    pskrMap = null;
+  }
+  pskrMapSpots = [];
+  sendPskrMapStatus({ connected: false });
 }
 
 // --- Shared QSO save logic ---
@@ -4435,6 +4563,10 @@ function createWindow() {
     if (pskr) {
       sendPskrStatus({ connected: pskr.connected });
     }
+    if (pskrMap) {
+      sendPskrMapStatus({ connected: pskrMap.connected, spotCount: pskrMapSpots.length });
+      if (pskrMapSpots.length > 0) sendPskrMapSpots();
+    }
     refreshSpots();
     fetchSolarData();
     // Auto-send DXCC data if enabled and ADIF path is set
@@ -5434,6 +5566,7 @@ app.whenReady().then(() => {
   if (settings.enableCwKeyer) connectKeyer();
   if (settings.enableWsjtx) connectWsjtx();
   if (settings.enablePskr) connectPskr();
+  if (settings.enablePskrMap) connectPskrMap();
   if (settings.sendToLogbook && settings.logbookType === 'hamrs') {
     hamrsBridge.start(settings.logbookHost || '127.0.0.1', parseInt(settings.logbookPort, 10) || 2237);
   }
@@ -6491,6 +6624,9 @@ app.whenReady().then(() => {
 
     const pskrChanged = has('enablePskr') && newSettings.enablePskr !== settings.enablePskr;
 
+    const pskrMapChanged = (has('enablePskrMap') && newSettings.enablePskrMap !== settings.enablePskrMap) ||
+      (has('myCallsign') && newSettings.myCallsign !== settings.myCallsign);
+
     const remoteChanged = (has('enableRemote') && newSettings.enableRemote !== settings.enableRemote) ||
       (has('remotePort') && newSettings.remotePort !== settings.remotePort) ||
       (has('remoteToken') && newSettings.remoteToken !== settings.remoteToken) ||
@@ -6602,6 +6738,15 @@ app.whenReady().then(() => {
         connectPskr();
       } else {
         disconnectPskr();
+      }
+    }
+
+    // Reconnect PSKReporter Map if settings changed
+    if (pskrMapChanged) {
+      if (settings.enablePskrMap) {
+        connectPskrMap();
+      } else {
+        disconnectPskrMap();
       }
     }
 
@@ -7583,6 +7728,12 @@ app.whenReady().then(() => {
   ipcMain.on('rbn-clear', () => {
     rbnSpots = [];
     sendRbnSpots();
+  });
+
+  // --- PSKReporter Map IPC ---
+  ipcMain.on('pskr-map-clear', () => {
+    pskrMapSpots = [];
+    sendPskrMapSpots();
   });
 
   // --- CW Keyer IPC ---

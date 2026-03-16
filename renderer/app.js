@@ -27,6 +27,7 @@ let enableDxcc = false;
 let enableCluster = false;
 let enableRbn = false;
 let enablePskr = false;
+let enablePskrMap = false;
 let enableDxe = true;
 let enableSolar = false;
 let enableBandActivity = false;
@@ -257,6 +258,9 @@ const setWsjtxAutoLog = document.getElementById('set-wsjtx-auto-log');
 const wsjtxStatusEl = document.getElementById('wsjtx-status');
 const setEnablePskr = document.getElementById('set-enable-pskr');
 const pskrConfig = document.getElementById('pskr-config');
+const setEnablePskrMap = document.getElementById('set-enable-pskr-map');
+const pskrMapConfig = document.getElementById('pskr-map-config');
+const connPskrMap = document.getElementById('conn-pskr-map');
 const setMyCallsign = document.getElementById('set-my-callsign');
 const setEnableClusterTerminal = document.getElementById('set-enable-cluster-terminal');
 const clusterTerminalBtn = document.getElementById('cluster-terminal-btn');
@@ -314,6 +318,7 @@ const CLUSTER_PRESETS = [
 ];
 let rbnConnected = false;
 let pskrConnected = false;
+let pskrMapConnected = false;
 const viewRbnBtn = document.getElementById('view-rbn-btn');
 const rbnView = document.getElementById('rbn-view');
 const rbnCountEl = document.getElementById('rbn-count');
@@ -366,6 +371,10 @@ let dirvActiveTab = 'nets';
 let dirvAutoRefreshTimer = null;
 const rbnMaxAgeInput = document.getElementById('rbn-max-age');
 const rbnAgeUnitSelect = document.getElementById('rbn-age-unit');
+// Propagation view source toggles and mode filter
+const propShowRbnEl = document.getElementById('prop-show-rbn');
+const propShowPskrEl = document.getElementById('prop-show-pskr');
+const propModeFilterEl = document.getElementById('prop-mode-filter');
 
 // JTCAT DOM refs
 const viewJtcatBtn = document.getElementById('view-jtcat-btn');
@@ -774,6 +783,7 @@ async function loadPrefs() {
   updateDxCommandBar();
   enableRbn = settings.enableRbn === true; // default false
   enablePskr = settings.enablePskr === true; // default false
+  enablePskrMap = settings.enablePskrMap === true; // default false
   enableDxe = settings.enableDxe !== false; // default true
   enableSolar = settings.enableSolar === true;   // default false
   // Color rows — default true (on)
@@ -897,7 +907,7 @@ async function loadPrefs() {
         setView('table');
         window.api.jtcatPopoutOpen();
       } else
-      if (viewState.lastView === 'rbn' && enableRbn) {
+      if (viewState.lastView === 'rbn' && (enableRbn || enablePskrMap)) {
         setView('rbn');
       } else if (viewState.lastView === 'dxcc' && enableDxcc) {
         setView('dxcc');
@@ -1504,6 +1514,7 @@ initMultiDropdown(bandFilterEl, 'Band', () => { updateBandButtonsVisibility(); r
 initMultiDropdown(modeFilterEl, 'Mode');
 initMultiDropdown(continentFilterEl, 'Region');
 initMultiDropdown(rbnBandFilterEl, 'Band', rerenderRbn);
+initMultiDropdown(propModeFilterEl, 'Mode', rerenderRbn);
 
 // --- Band QSY buttons (shown when Radio band filter is active) ---
 const BAND_QSY_FREQS = {
@@ -1571,6 +1582,9 @@ bandButtonsEl.addEventListener('click', (e) => {
 // RBN age filter — re-render on change
 rbnMaxAgeInput.addEventListener('change', rerenderRbn);
 rbnAgeUnitSelect.addEventListener('change', rerenderRbn);
+// Propagation source toggles
+propShowRbnEl.addEventListener('change', () => { propShowRbn = propShowRbnEl.checked; rerenderRbn(); });
+propShowPskrEl.addEventListener('change', () => { propShowPskr = propShowPskrEl.checked; rerenderRbn(); });
 
 // DXCC filter constants
 const DXCC_MODE_GROUPS = {
@@ -1618,7 +1632,7 @@ function updateWsjtxStatusVisibility() {
 }
 
 function updateSettingsConnBar() {
-  const anyVisible = enableCluster || enableRbn || enablePskr || enableRemote;
+  const anyVisible = enableCluster || enableRbn || enablePskr || enablePskrMap || enableRemote;
   connBar.classList.toggle('hidden', !anyVisible);
   connCluster.classList.toggle('hidden', !enableCluster);
   connCluster.classList.toggle('connected', clusterConnected);
@@ -1632,17 +1646,23 @@ function updateSettingsConnBar() {
   connRbn.classList.toggle('connected', rbnConnected);
   connPskr.classList.toggle('hidden', !enablePskr);
   connPskr.classList.toggle('connected', pskrConnected);
+  connPskrMap.classList.toggle('hidden', !enablePskrMap);
+  connPskrMap.classList.toggle('connected', pskrMapConnected);
   connRemote.classList.toggle('hidden', !enableRemote);
   connRemote.classList.toggle('connected', remoteConnected);
 }
 
 function updateRbnButton() {
-  if (enableRbn) {
+  const propEnabled = enableRbn || enablePskrMap;
+  if (propEnabled) {
     viewRbnBtn.classList.remove('hidden');
   } else {
     viewRbnBtn.classList.add('hidden');
     if (currentView === 'rbn') setView('table');
   }
+  // Update source toggle visibility based on which sources are enabled
+  propShowRbnEl.closest('label').classList.toggle('hidden', !enableRbn);
+  propShowPskrEl.closest('label').classList.toggle('hidden', !enablePskrMap);
   // Also update the activator toolbar RBN button (safe even before DOM ref is set)
   if (typeof updateActivatorRbnButton === 'function') updateActivatorRbnButton();
 }
@@ -2411,6 +2431,9 @@ setEnableWsjtx.addEventListener('change', () => {
 
 setEnablePskr.addEventListener('change', () => {
   pskrConfig.classList.toggle('hidden', !setEnablePskr.checked);
+});
+setEnablePskrMap.addEventListener('change', () => {
+  pskrMapConfig.classList.toggle('hidden', !setEnablePskrMap.checked);
 });
 
 // PstRotator checkbox toggles rotor config visibility
@@ -3610,6 +3633,11 @@ let rbnMarkerLayer = null;
 let rbnHomeMarker = null;
 let rbnNightLayer = null;
 let rbnHomePos = null; // { lat, lon } for arc drawing
+
+// PSKReporter Map state (spots shown on the shared Propagation map)
+let pskrMapSpots = [];
+let propShowRbn = true;   // source toggle: show RBN spots on propagation map
+let propShowPskr = true;  // source toggle: show PSKReporter spots on propagation map
 
 // RBN_BAND_COLORS is now managed by RBN_BAND_COLORS_ACTIVE (see colorblind palettes above)
 
@@ -6451,6 +6479,8 @@ async function openSettingsDialog(tab) {
   wsjtxConfig.classList.toggle('hidden', !s.enableWsjtx);
   setEnablePskr.checked = s.enablePskr === true;
   pskrConfig.classList.toggle('hidden', !s.enablePskr);
+  setEnablePskrMap.checked = s.enablePskrMap === true;
+  pskrMapConfig.classList.toggle('hidden', !s.enablePskrMap);
   setEnableLogging.checked = s.enableLogging === true;
   setEnableBannerLogger.checked = s.enableBannerLogger === true;
   setN1mmRst.checked = s.n1mmRst === true;
@@ -6611,6 +6641,7 @@ settingsSave.addEventListener('click', async () => {
   let clusterEnabled = setEnableCluster.checked;
   let rbnEnabled = setEnableRbn.checked;
   const pskrEnabled = setEnablePskr.checked;
+  const pskrMapEnabled = setEnablePskrMap.checked;
 
   // DX Cluster and RBN require a callsign
   if (clusterEnabled && !myCallsign) {
@@ -6622,6 +6653,12 @@ settingsSave.addEventListener('click', async () => {
     rbnEnabled = false;
     setEnableRbn.checked = false;
     alert('RBN requires a callsign. Please enter your callsign above.');
+  }
+  let pskrMapEnabledVal = pskrMapEnabled;
+  if (pskrMapEnabledVal && !myCallsign) {
+    pskrMapEnabledVal = false;
+    setEnablePskrMap.checked = false;
+    alert('PSKReporter Map requires a callsign. Please enter your callsign above.');
   }
   const clusterNodes = currentClusterNodes;
   const showBeaconsEnabled = setShowBeacons.checked;
@@ -6742,6 +6779,7 @@ settingsSave.addEventListener('click', async () => {
     enableRbn: rbnEnabled,
     enableWsjtx: wsjtxEnabled,
     enablePskr: pskrEnabled,
+    enablePskrMap: pskrMapEnabledVal,
     wsjtxPort: wsjtxPortVal,
     wsjtxHighlight: wsjtxHighlightEnabled,
     wsjtxAutoLog: wsjtxAutoLogEnabled,
@@ -6839,6 +6877,7 @@ settingsSave.addEventListener('click', async () => {
   enableCluster = clusterEnabled;
   enableRbn = rbnEnabled;
   enablePskr = pskrEnabled;
+  enablePskrMap = pskrMapEnabledVal;
   enableRemote = remoteEnabled;
   enableWsjtx = wsjtxEnabled;
   updateWsjtxStatusVisibility();
@@ -8938,12 +8977,23 @@ function updateRbnNightOverlay() {
 
 function getFilteredRbnSpots() {
   const bands = getDropdownValues(rbnBandFilterEl);
+  const modes = getDropdownValues(propModeFilterEl);
   const maxAge = parseInt(rbnMaxAgeInput.value, 10) || 30;
   const ageUnit = rbnAgeUnitSelect.value; // 'm' or 'h'
   const maxAgeSecs = maxAge * (ageUnit === 'h' ? 3600 : 60);
 
-  return rbnSpots.filter((s) => {
+  // Merge RBN and PSKReporter spots based on source toggles
+  const merged = [];
+  if (propShowRbn) {
+    for (const s of rbnSpots) merged.push({ ...s, _source: 'rbn', _station: s.spotter });
+  }
+  if (propShowPskr) {
+    for (const s of pskrMapSpots) merged.push({ ...s, _source: 'pskr', _station: s.receiver });
+  }
+
+  return merged.filter((s) => {
     if (bands && !bands.has(s.band)) return false;
+    if (modes && !modes.has(s.mode)) return false;
     if (spotAgeSecs(s.spotTime) > maxAgeSecs) return false;
     return true;
   });
@@ -8992,9 +9042,10 @@ function renderRbnMarkers() {
     const snrStr = s.snr != null ? s.snr + ' dB' : '';
     const wpmStr = s.wpm != null ? s.wpm + ' WPM' : '';
     const details = [snrStr, wpmStr].filter(Boolean).join(' / ');
+    const srcLabel = s._source === 'pskr' ? 'PSKReporter' : 'RBN';
 
     const popupContent = `
-      <b><a href="#" class="popup-qrz" data-call="${s.spotter}">${s.spotter}</a></b><br>
+      <b><a href="#" class="popup-qrz" data-call="${s._station}">${s._station}</a></b> <span class="help-text">${srcLabel}</span><br>
       ${s.locationDesc}<br>
       ${s.band || ''} ${s.mode || ''} &middot; ${details}<br>
       ${distStr ? distStr + '<br>' : ''}
@@ -9036,7 +9087,6 @@ function renderRbnLegend(activeBands) {
 function renderRbnTable() {
   rbnTableBody.innerHTML = '';
   rbnDistHeader.textContent = distUnit === 'km' ? 'Dist (km)' : 'Dist (mi)';
-  const unit = distUnit === 'km' ? 'km' : 'mi';
 
   // Show newest spots first
   const sorted = [...getFilteredRbnSpots()].reverse();
@@ -9044,27 +9094,32 @@ function renderRbnTable() {
   for (const s of sorted) {
     const tr = document.createElement('tr');
 
-    // Spotter (QRZ link)
-    const spotterTd = document.createElement('td');
-    const spotterLink = document.createElement('a');
-    spotterLink.textContent = s.spotter;
-    spotterLink.href = '#';
-    spotterLink.className = 'qrz-link';
-    spotterLink.addEventListener('click', (e) => {
+    // Station (QRZ link with source dot)
+    const stationTd = document.createElement('td');
+    const dot = document.createElement('span');
+    dot.className = 'prop-source-dot';
+    dot.style.background = s._source === 'pskr' ? '#ff6b6b' : 'var(--source-rbn)';
+    dot.title = s._source === 'pskr' ? 'PSKReporter' : 'RBN';
+    stationTd.appendChild(dot);
+    const stationLink = document.createElement('a');
+    stationLink.textContent = s._station;
+    stationLink.href = '#';
+    stationLink.className = 'qrz-link';
+    stationLink.addEventListener('click', (e) => {
       e.preventDefault();
-      window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(s.spotter.split('/')[0])}`);
+      window.api.openExternal(`https://www.qrz.com/db/${encodeURIComponent(s._station.split('/')[0])}`);
     });
-    spotterTd.appendChild(spotterLink);
-    tr.appendChild(spotterTd);
+    stationTd.appendChild(stationLink);
+    tr.appendChild(stationTd);
 
-    // Spotted (location description)
-    const spottedTd = document.createElement('td');
-    spottedTd.textContent = s.locationDesc || '';
-    tr.appendChild(spottedTd);
+    // Location
+    const locTd = document.createElement('td');
+    locTd.textContent = s.locationDesc || '';
+    tr.appendChild(locTd);
 
     // Distance
     const distTd = document.createElement('td');
-    distTd.textContent = s.distance != null ? formatDistance(s.distance) : '—';
+    distTd.textContent = s.distance != null ? formatDistance(s.distance) : '\u2014';
     tr.appendChild(distTd);
 
     // Freq
@@ -9077,22 +9132,12 @@ function renderRbnTable() {
     modeTd.textContent = s.mode || '';
     tr.appendChild(modeTd);
 
-    // Type
-    const typeTd = document.createElement('td');
-    typeTd.textContent = s.type || '';
-    tr.appendChild(typeTd);
-
     // SNR
     const snrTd = document.createElement('td');
     snrTd.textContent = s.snr != null ? s.snr + ' dB' : '';
     tr.appendChild(snrTd);
 
-    // Speed
-    const speedTd = document.createElement('td');
-    speedTd.textContent = s.wpm != null ? s.wpm + ' WPM' : '';
-    tr.appendChild(speedTd);
-
-    // Time (HHMM from spotTime)
+    // Time
     const timeTd = document.createElement('td');
     try {
       const d = new Date(s.spotTime);
@@ -9142,7 +9187,9 @@ rbnSplitter.addEventListener('mousedown', (e) => {
 // RBN clear button
 rbnClearBtn.addEventListener('click', () => {
   window.api.clearRbn();
+  window.api.clearPskrMap();
   rbnSpots = [];
+  pskrMapSpots = [];
   renderRbnMarkers();
   renderRbnTable();
 });
@@ -9167,6 +9214,26 @@ window.api.onPskrStatus(({ connected, error, spotCount, nextPollAt, pollUpdate }
   if (nextPollAt) pskrNextPollAt = nextPollAt;
   if (!pollUpdate) {
     if (connected && spotCount != null) showLogToast(`FreeDV: ${spotCount} spots (polling every 5 min)`, { duration: 4000 });
+    if (error) showLogToast(error, { warn: true, duration: 5000 });
+  }
+});
+
+// --- PSKReporter Map IPC listeners (feeds into shared Propagation view) ---
+window.api.onPskrMapSpots((spots) => {
+  pskrMapSpots = spots;
+  if (currentView === 'rbn') {
+    renderRbnMarkers();
+    renderRbnTable();
+  }
+});
+
+let pskrMapNextPollAt = null;
+window.api.onPskrMapStatus(({ connected, error, spotCount, nextPollAt, pollUpdate }) => {
+  pskrMapConnected = connected;
+  if (nextPollAt) pskrMapNextPollAt = nextPollAt;
+  updateSettingsConnBar();
+  if (!pollUpdate) {
+    if (connected && spotCount != null) showLogToast(`PSKReporter: ${spotCount} spots (polling every 5 min)`, { duration: 4000 });
     if (error) showLogToast(error, { warn: true, duration: 5000 });
   }
 });
@@ -12426,12 +12493,30 @@ async function startJtcatAudio() {
     // ScriptProcessorNode: 4096 samples at 12kHz = ~341ms per callback
     jtcatAudioProcessor = jtcatAudioCtx.createScriptProcessor(4096, 1, 1);
     jtcatAudioProcessor.onaudioprocess = function(e) {
-      var samples = e.inputBuffer.getChannelData(0);
-      // Send copy of buffer to main process for FT8 decode
-      window.api.jtcatAudio(Array.from(samples));
+      try {
+        var samples = e.inputBuffer.getChannelData(0);
+        // Send copy of buffer to main process for FT8 decode
+        window.api.jtcatAudio(Array.from(samples));
+      } catch (err) {
+        console.error('[JTCAT] Audio processor error:', err.message || err);
+      }
     };
     source.connect(jtcatAudioProcessor);
     jtcatAudioProcessor.connect(jtcatAudioCtx.destination);
+
+    // Monitor audio stream — some rigs (e.g. Yaesu FT-710) disconnect USB audio during TX
+    var audioTrack = jtcatAudioStream.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.addEventListener('ended', function() {
+        console.warn('[JTCAT] Audio track ended (device disconnected?) — restarting capture in 2s');
+        setTimeout(function() {
+          if (jtcatRunning || jtcatRemoteActive) {
+            stopJtcatAudio();
+            startJtcatAudio();
+          }
+        }, 2000);
+      });
+    }
 
     // Start waterfall rendering loop
     jtcatWaterfallLoop();
@@ -13267,6 +13352,7 @@ var waterfallAnimFrame = null;
 function jtcatWaterfallLoop() {
   if (!jtcatRunning || !jtcatAnalyser) return;
 
+  try {
   var freqData = new Uint8Array(jtcatAnalyser.frequencyBinCount);
   jtcatAnalyser.getByteFrequencyData(freqData);
 
@@ -13380,6 +13466,9 @@ function jtcatWaterfallLoop() {
     window.api.jtcatSpectrum(specBins);
   }
 
+  } catch (err) {
+    console.error('[JTCAT] Waterfall error (will retry):', err.message || err);
+  }
   waterfallAnimFrame = requestAnimationFrame(jtcatWaterfallLoop);
 }
 
@@ -13492,11 +13581,15 @@ async function playJtcatTxAudio(data) {
     source.buffer = buffer;
     source.connect(jtcatTxAudioCtx.destination);
 
-    source.onended = function() {
+    var txDone = false;
+    function finishTx() {
+      if (txDone) return;
+      txDone = true;
       jtcatTxPlaying = false;
       window.api.jtcatTxComplete();
       console.log('[JTCAT] TX audio playback complete');
-    };
+    }
+    source.onended = finishTx;
     // Skip into the audio buffer for late-start TX so we stay within the cycle
     var offsetSec = offsetMs / 1000;
     var durationSec = buffer.duration - offsetSec;
@@ -13505,6 +13598,14 @@ async function playJtcatTxAudio(data) {
     } else {
       source.start(0, offsetSec);
     }
+    // Safety: force TX complete if onended never fires (device glitch, etc.)
+    var safetyDur = Math.max(durationSec, buffer.duration) + 2;
+    setTimeout(function() {
+      if (!txDone) {
+        console.warn('[JTCAT] TX audio safety timeout — forcing tx-complete');
+        finishTx();
+      }
+    }, safetyDur * 1000);
     console.log('[JTCAT] TX audio playing, offset=' + offsetSec.toFixed(1) + 's, dur=' + durationSec.toFixed(1) + 's, device:', outputDeviceId || 'default');
   } catch (err) {
     jtcatTxPlaying = false;
