@@ -214,6 +214,7 @@ const rigAddBtn = document.getElementById('rig-add-btn');
 const rigEditor = document.getElementById('rig-editor');
 const rigEditorTitle = document.getElementById('rig-editor-title');
 const setRigName = document.getElementById('set-rig-name');
+const rigModelSelect = document.getElementById('set-rig-model-select');
 const rigSaveBtn = document.getElementById('rig-save-btn');
 const rigCancelBtn = document.getElementById('rig-cancel-btn');
 const setRigModel = document.getElementById('set-rig-model');
@@ -1129,6 +1130,40 @@ let rigEditorMode = null; // null | 'add' | 'edit'
 let editingRigId = null;
 let currentRigs = []; // local copy of settings.rigs
 let currentActiveRigId = null; // local copy of settings.activeRigId
+let rigModelData = []; // populated from main process on first use
+
+async function populateRigModelDropdown() {
+  if (!rigModelSelect) return;
+  if (rigModelData.length > 0) return;
+  try { rigModelData = await window.api.getRigModels(); } catch { return; }
+  while (rigModelSelect.options.length > 1) rigModelSelect.remove(1);
+  for (const group of rigModelData) {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = group.brand;
+    for (const name of group.models) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      optgroup.appendChild(opt);
+    }
+    rigModelSelect.appendChild(optgroup);
+  }
+}
+
+if (rigModelSelect) rigModelSelect.addEventListener('change', () => {
+  const modelName = rigModelSelect.value;
+  if (!modelName) return;
+  let brand = null;
+  for (const group of rigModelData) {
+    if (group.models.includes(modelName)) { brand = group.brand; break; }
+  }
+  if (!brand) return;
+  if (brand === 'FlexRadio') setRadioType('flex');
+  else if (brand === 'Icom') setRadioType('icom');
+  else setRadioType('serialcat');
+  updateRadioSubPanels();
+  if (!setRigName.value.trim()) setRigName.value = modelName;
+});
 
 function describeRigTarget(target) {
   if (!target) return 'Not configured';
@@ -1199,7 +1234,7 @@ function renderRigList(rigs, activeRigId) {
     nameEl.textContent = rig.name || 'Unnamed Rig';
     const descEl = document.createElement('div');
     descEl.className = 'rig-item-desc';
-    descEl.textContent = describeRigTarget(rig.catTarget);
+    descEl.textContent = (rig.model ? rig.model + ' \u2014 ' : '') + describeRigTarget(rig.catTarget);
     info.appendChild(nameEl);
     info.appendChild(descEl);
 
@@ -1286,17 +1321,21 @@ async function openRigEditor(mode, rigId) {
   serialcatPortsLoaded = false;
   icomPortsLoaded = false;
 
+  await populateRigModelDropdown();
+
   if (mode === 'edit') {
     rigEditorTitle.textContent = 'Edit Rig';
     const rig = currentRigs.find(r => r.id === rigId);
     if (rig) {
       setRigName.value = rig.name || '';
+      if (rigModelSelect) rigModelSelect.value = rig.model || '';
       await populateRadioSection(rig.catTarget);
       await populateRigAudioDevices(rig.remoteAudioInput, rig.remoteAudioOutput);
     }
   } else {
     rigEditorTitle.textContent = 'Add Rig';
     setRigName.value = '';
+    if (rigModelSelect) rigModelSelect.value = '';
     setRadioType('flex');
     updateRadioSubPanels();
     await populateRigAudioDevices('', '');
@@ -1334,6 +1373,7 @@ rigCancelBtn.addEventListener('click', () => closeRigEditor());
 rigSaveBtn.addEventListener('click', async () => {
   const name = setRigName.value.trim() || 'Unnamed Rig';
   const catTarget = buildCatTargetFromForm();
+  const model = rigModelSelect ? rigModelSelect.value || null : null;
 
   const rigAudioIn = rigRemoteAudioInput.value || '';
   const rigAudioOut = rigRemoteAudioOutput.value || '';
@@ -1342,6 +1382,7 @@ rigSaveBtn.addEventListener('click', async () => {
     const rig = currentRigs.find(r => r.id === editingRigId);
     if (rig) {
       rig.name = name;
+      rig.model = model;
       rig.catTarget = catTarget;
       rig.remoteAudioInput = rigAudioIn;
       rig.remoteAudioOutput = rigAudioOut;
@@ -1350,6 +1391,7 @@ rigSaveBtn.addEventListener('click', async () => {
     const newRig = {
       id: 'rig_' + Date.now(),
       name,
+      model,
       catTarget,
       remoteAudioInput: rigAudioIn,
       remoteAudioOutput: rigAudioOut,
@@ -8628,11 +8670,12 @@ window.api.onWsjtxActivatorQso((contact) => {
       contact,
     });
   }
-  // Fire-and-forget QRZ lookup for name + grid
+  // Fire-and-forget QRZ lookup for name + grid + state
   window.api.qrzLookup(contact.callsign).then(info => {
     if (info) {
       contact.name = qrzDisplayName(info);
       if (info.grid) contact.grid = info.grid;
+      if (!contact.state && info.state) contact.state = info.state;
       renderActivatorLog();
       if (actmapPopoutOpen && info.grid) {
         window.api.actmapPopoutContact({
@@ -10070,6 +10113,7 @@ const activatorUtcEl = document.getElementById('activator-utc');
 const activatorTimerEl = document.getElementById('activator-timer');
 const activatorCallsignInput = document.getElementById('activator-callsign');
 const activatorOpNameEl = document.getElementById('activator-op-name');
+const activatorStateInput = document.getElementById('activator-state');
 const activatorLogBtn = document.getElementById('activator-log-btn');
 const activatorLogBody = document.getElementById('activator-log-body');
 const activatorExportBtn = document.getElementById('activator-export');
@@ -10405,6 +10449,7 @@ function resumeActivation(activation) {
       band: c.band || '',
       rstSent: c.rstSent || '',
       rstRcvd: c.rstRcvd || '',
+      state: c.state || '',
       name: c.name || '',
       myParks: [activation.parkRef],
       theirParks: c.sigInfo ? [c.sigInfo] : [],
@@ -10573,6 +10618,7 @@ function renderActivatorLog() {
       <td class="act-log-time act-log-editable" data-field="timeUtc">${c.timeUtc || ''}</td>
       <td class="act-log-call act-log-editable" data-field="callsign">${c.callsign || ''}${dupeFlag}${p2pBadge}</td>
       <td class="act-log-name">${c.name || ''}</td>
+      <td class="act-log-state act-log-editable" data-field="state">${c.state || ''}</td>
       <td class="act-log-freq act-log-editable" data-field="freqDisplay">${c.freqDisplay || ''}</td>
       <td class="act-log-mode act-log-editable" data-field="mode">${c.mode || ''}</td>
       <td class="act-log-rst act-log-editable" data-field="rstSent">${c.rstSent || ''}</td>
@@ -10640,7 +10686,7 @@ activatorLogBody.addEventListener('dblclick', (e) => {
     input.type = 'text';
     input.className = 'act-log-edit-input';
     input.value = rawValue;
-    if (field === 'callsign') input.style.textTransform = 'uppercase';
+    if (field === 'callsign' || field === 'state') input.style.textTransform = 'uppercase';
     td.textContent = '';
     td.appendChild(input);
     input.focus();
@@ -10713,6 +10759,12 @@ async function saveActivatorEdit(idx, field, newVal) {
     case 'rstRcvd':
       c.rstRcvd = newVal;
       adifUpdates.RST_RCVD = newVal;
+      break;
+    case 'state':
+      c.state = newVal.toUpperCase();
+      adifUpdates.STATE = c.state;
+      if (c.qsoData) c.qsoData.state = c.state;
+      if (c.qsoDataList) c.qsoDataList.forEach(q => { q.state = c.state; });
       break;
     case 'timeUtc': {
       c.timeUtc = newVal;
@@ -11394,6 +11446,9 @@ async function activatorLogContact() {
   const rstSent = getRstDigits('activator-rst-sent', mode === 'SSB' || mode === 'FM' ? '59' : '599');
   const rstRcvd = getRstDigits('activator-rst-rcvd', mode === 'SSB' || mode === 'FM' ? '59' : '599');
 
+  // State: prefer user-edited value, auto-filled from QRZ
+  const stateVal = activatorStateInput ? activatorStateInput.value.trim().toUpperCase() : '';
+
   // Frequency: prefer the input field (may have been manually entered), fall back to CAT
   const inputMhz = parseFloat(activatorFreqInput.value);
   const freqKhz = inputMhz > 0 ? Math.round(inputMhz * 1000) : (activatorFreqKhz || radioFreqKhz || 0);
@@ -11423,6 +11478,7 @@ async function activatorLogContact() {
       rstSent,
       rstRcvd,
       txPower: defaultPower ? String(defaultPower) : '',
+      state: stateVal,
       stationCallsign: myCallsign || '',
       operator: myCallsign || '',
       myGridsquare: activatorParkGrid || '',
@@ -11492,6 +11548,7 @@ async function activatorLogContact() {
       band,
       rstSent,
       rstRcvd,
+      state: stateVal,
       name: '',
       myParks: [...myParks.map(p => p.ref), ...activatorCrossRefs.map(xr => xr.ref)],
       theirParks: hunterParkRefs.map(p => p.ref),
@@ -11508,11 +11565,12 @@ async function activatorLogContact() {
       });
     }
 
-    // Fire-and-forget QRZ lookup for name + grid
+    // Fire-and-forget QRZ lookup for name + grid + state (if not already set)
     window.api.qrzLookup(callsign).then(info => {
       if (info) {
         contact.name = qrzDisplayName(info);
         if (info.grid) contact.grid = info.grid;
+        if (!contact.state && info.state) contact.state = info.state;
         renderActivatorLog();
         // Update pop-out map with precise grid location
         if (actmapPopoutOpen && info.grid) {
@@ -11532,6 +11590,7 @@ async function activatorLogContact() {
   // Clear and refocus
   activatorCallsignInput.value = '';
   activatorOpNameEl.textContent = '';
+  if (activatorStateInput) activatorStateInput.value = '';
   resetActivatorRst();
   // Reset hunter parks for next QSO
   hunterParkRefs = [];
@@ -11558,6 +11617,7 @@ if (activatorCallsignInput) {
         window.api.qrzLookup(val).then(info => {
           if (info && activatorCallsignInput.value.trim().toUpperCase() === val) {
             activatorOpNameEl.textContent = qrzDisplayName(info);
+            if (activatorStateInput) activatorStateInput.value = info.state || '';
           }
         }).catch(() => {});
       }
@@ -11570,6 +11630,13 @@ setupRstAutoAdvance('activator-rst-sent', 'activator-rst-rcvd', () => {
   const mode = activatorModeSelect.value;
   return (mode === 'SSB' || mode === 'FM') ? 2 : 3;
 });
+
+// Enter key in state field triggers log
+if (activatorStateInput) {
+  activatorStateInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); activatorLogContact(); }
+  });
+}
 
 // Enter key in any activator RST field (both modes) triggers log
 document.querySelectorAll('#activator-rst-sent, #activator-rst-rcvd, #activator-rst-sent-digits .rst-digit, #activator-rst-rcvd-digits .rst-digit').forEach(el => {
@@ -12061,12 +12128,14 @@ if (activatorCallsignInput) {
     const val = activatorCallsignInput.value.trim().toUpperCase();
     if (val.length < 3) {
       activatorOpNameEl.textContent = '';
+      if (activatorStateInput) activatorStateInput.value = '';
       return;
     }
     activatorQrzTimeout = setTimeout(async () => {
       const info = await window.api.qrzLookup(val);
       if (info && activatorCallsignInput.value.trim().toUpperCase() === val) {
         activatorOpNameEl.textContent = qrzDisplayName(info);
+        if (activatorStateInput) activatorStateInput.value = info.state || '';
       }
     }, 400);
   });

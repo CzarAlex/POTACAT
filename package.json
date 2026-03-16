@@ -6,6 +6,9 @@
     "name": "Casey Stanton",
     "email": "casey@potacat.com"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -65,6 +68,9 @@
     "mac": {
       "target": "dmg",
       "category": "public.app-category.utilities",
+      "identity": null,
+      "entitlements": null,
+      "entitlementsInherit": null,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "POTACAT needs microphone access for ECHOCAT remote audio.",
         "NSCameraUsageDescription": "POTACAT does not use the camera but WebRTC requires this permission."

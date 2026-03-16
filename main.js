@@ -35,6 +35,7 @@ const { fetchNets: fetchDirectoryNets, fetchSwl: fetchDirectorySwl } = require('
 const { QrzClient } = require('./lib/qrz');
 const { callsignToProgram, fetchParksForProgram, loadParksCache, saveParksCache, isCacheStale, searchParks: searchParksDb, getPark: getParkDb, buildParksMap } = require('./lib/pota-parks-db');
 const { fetchDxCalExpeditions } = require('./lib/dxcal');
+const { getModel, getModelList } = require('./lib/rig-models');
 const { autoUpdater } = require('electron-updater');
 
 // --- QRZ.com callsign lookup ---
@@ -157,7 +158,19 @@ function detectRigType() {
   return 'unknown';
 }
 
+/** Get the active rig's model entry from rig-models.js, or null */
+function getActiveRigModel() {
+  const activeRig = (settings.rigs || []).find(r => r.id === settings.activeRigId);
+  const modelName = activeRig?.model || null;
+  const rigType = detectRigType();
+  return getModel(modelName, rigType);
+}
+
 function getRigCapabilities(rigType) {
+  // Try model-specific capabilities first
+  const model = getActiveRigModel();
+  if (model && model.caps) return { ...model.caps };
+  // Fallback to generic per-type
   switch (rigType) {
     case 'flex':    return { nb: true, atu: true, vfo: false, filter: true, filterType: 'arbitrary', rfgain: true, txpower: true, power: false };
     case 'yaesu':   return { nb: true, atu: true, vfo: true, filter: true, filterType: 'indexed', rfgain: true, txpower: true, power: true };
@@ -2218,8 +2231,10 @@ function connectRemote() {
       }
       smartSdr.cwKey(down);
     }
-    // Serial CAT keying — TX;/RX; for Kenwood/Yaesu, DTR for Icom
+    // Serial CAT keying — method depends on radio model
     const rigType = detectRigType();
+    const rigModel = getActiveRigModel();
+    const cwCaps = rigModel?.cw || {};
     if (cat && cat.connected && (rigType === 'kenwood' || rigType === 'yaesu' || rigType === 'icom')) {
       // Pause polling so commands don't interleave with CW keying
       if (down) {
@@ -2233,8 +2248,12 @@ function connectRemote() {
           cat.resumePolling();
         }, 1500);
       }
-      if (rigType === 'icom') {
-        cat.setCwKeyDtr(down);
+      // Route keying based on model's preferred paddle method
+      const paddleMethod = cwCaps.paddleKey || (rigType === 'icom' ? 'dtr' : 'txrx');
+      if (paddleMethod === 'dtr') {
+        cat.setCwKeyDtr(down, cwCaps.dtrPins);
+      } else if (paddleMethod === 'ta' && cwCaps.taKey) {
+        cat.setCwKeyTa(down);
       } else {
         cat.setCwKeyTxRx(down);
       }
@@ -5259,7 +5278,7 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
       const ssbSide = freqHz < 10000000 && !(freqHz >= 5300000 && freqHz <= 5410000) ? 'LSB' : 'USB';
       const flexMode = (mode === 'FT8' || mode === 'FT4' || mode === 'FT2' || mode === 'JT65' || mode === 'JT9' || mode === 'WSPR' || mode === 'DIGU' || mode === 'PKTUSB')
         ? 'DIGU' : (mode === 'DIGL' || mode === 'PKTLSB') ? 'DIGL'
-        : (mode === 'CW' ? 'CW' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))));
+        : (mode === 'CW' ? 'CW' : (mode === 'AM' ? 'AM' : (mode === 'FM' ? 'FM' : (mode === 'SSB' ? ssbSide : (mode === 'USB' ? 'USB' : (mode === 'LSB' ? 'LSB' : null))))));
       sendCatLog(`tune via SmartSDR API: slice=${sliceIndex} freq=${freqMhz.toFixed(6)}MHz mode=${mode}→${flexMode} filter=${filterWidth}`);
       smartSdr.tuneSlice(sliceIndex, freqMhz, flexMode, filterWidth);
       // Set or clear XIT on the slice
@@ -6317,6 +6336,7 @@ app.whenReady().then(() => {
   ipcMain.on('refresh', () => { markUserActive(); refreshSpots(); });
 
   ipcMain.handle('get-settings', () => ({ ...settings, appVersion: require('./package.json').version }));
+  ipcMain.handle('get-rig-models', () => getModelList());
 
   // --- ECHOCAT IPC ---
   ipcMain.handle('get-local-ips', () => RemoteServer.getLocalIPs());

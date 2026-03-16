@@ -316,6 +316,7 @@
         <input type="text" class="rst-input" id="activator-rst-rcvd" maxlength="3" inputmode="numeric" value="599" spellcheck="false" autocomplete="off">
       </div>
       <span id="activator-op-name" class="activator-op-name"></span>
+      <input type="text" id="activator-state" placeholder="State" maxlength="6" spellcheck="false" autocomplete="off" title="State (auto-filled from QRZ, editable)" style="text-transform:uppercase;">
       <div class="activator-hunter-park-wrap">
         <input type="text" id="activator-hunter-park" placeholder="P2P ref" maxlength="12" spellcheck="false" autocomplete="off" title="Hunter's park ref (park-to-park)">
         <span id="activator-hunter-park-extra" class="activator-park-extra hidden"></span>
@@ -345,6 +346,7 @@
             <th>Time</th>
             <th>Callsign</th>
             <th>Name</th>
+            <th>State</th>
             <th>Freq</th>
             <th>Mode</th>
             <th>RST S</th>
@@ -880,6 +882,12 @@
         <label>Rig Name:
           <input type="text" id="set-rig-name" placeholder="My Radio" maxlength="40">
         </label>
+        <label>Radio Model:
+          <select id="set-rig-model-select">
+            <option value="">(not set)</option>
+          </select>
+        </label>
+        <span class="help-text" style="margin-bottom:8px;display:block;">Selecting your model enables model-specific features: CW keying, ATU commands, CI-V address, filter control, and power limits.</span>
         <label class="radio-label"><input type="radio" name="radio-type" value="flex" checked> FlexRadio (SmartSDR)</label>
         <div id="flex-config" class="radio-sub hidden">
           <label>Slice: <select id="set-flex-slice">

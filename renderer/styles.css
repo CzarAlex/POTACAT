@@ -4408,6 +4408,18 @@ body.activator-rbn-on #rbn-view {
   text-overflow: ellipsis;
 }
 
+#activator-state {
+  width: 52px;
+  padding: 4px 6px;
+  font-size: 13px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+#activator-state:focus { border-color: var(--accent-green); outline: none; }
+
 .activator-log-btn {
   background: var(--accent-green-btn);
   border: none;

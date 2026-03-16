@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   tune: (frequency, mode, bearing, slicePort) => ipcRenderer.send('tune', { frequency, mode, bearing, slicePort }),
   refresh: () => ipcRenderer.send('refresh'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
+  getRigModels: () => ipcRenderer.invoke('get-rig-models'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
   listPorts: () => ipcRenderer.invoke('list-ports'),
   listRigs: () => ipcRenderer.invoke('list-rigs'),
