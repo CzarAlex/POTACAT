@@ -786,8 +786,9 @@ async function loadPrefs() {
   enablePskrMap = settings.enablePskrMap === true; // default false
   enableDxe = settings.enableDxe !== false; // default true
   enableSolar = settings.enableSolar === true;   // default false
-  // PSTRotator — mark as configured so quick-toggle is visible on first dropdown open
-  if (settings.enableRotor) rotorConfigured = true;
+  // PSTRotator — mark as configured so quick-toggle and status bar button are visible
+  if (settings.enableRotor) { rotorConfigured = true; rotorEnabled = true; }
+  updateRotorStatusBtn();
   // Color rows — default true (on)
   spotsTable.classList.toggle('no-source-tint', settings.colorRows === false);
   enableBandActivity = settings.enableBandActivity === true; // default false
@@ -6146,11 +6147,32 @@ const quickRotor = document.getElementById('quick-rotor');
 const quickRotorLabel = document.getElementById('quick-rotor-label');
 const quickRotorDivider = document.getElementById('quick-rotor-divider');
 let rotorConfigured = false; // set true when enableRotor is loaded/toggled on
+let rotorEnabled = false; // current rotor state for status bar button
+
+// Status bar rotor button
+const rotorStatusBtn = document.getElementById('rotor-status-btn');
+
+function updateRotorStatusBtn() {
+  rotorStatusBtn.classList.toggle('hidden', !rotorConfigured);
+  rotorStatusBtn.style.background = rotorEnabled ? '#2a6e4e' : '#555';
+  rotorStatusBtn.style.opacity = rotorEnabled ? '1' : '0.7';
+  rotorStatusBtn.title = rotorEnabled ? 'PSTRotator ON — click to disable' : 'PSTRotator OFF — click to enable';
+}
+
+rotorStatusBtn.addEventListener('click', async () => {
+  rotorEnabled = !rotorEnabled;
+  setEnableRotor.checked = rotorEnabled;
+  quickRotor.checked = rotorEnabled;
+  updateRotorStatusBtn();
+  await window.api.saveSettings({ enableRotor: rotorEnabled });
+});
 
 quickRotor.addEventListener('change', async () => {
-  setEnableRotor.checked = quickRotor.checked;
-  if (quickRotor.checked) rotorConfigured = true;
-  await window.api.saveSettings({ enableRotor: quickRotor.checked });
+  rotorEnabled = quickRotor.checked;
+  setEnableRotor.checked = rotorEnabled;
+  if (rotorEnabled) rotorConfigured = true;
+  updateRotorStatusBtn();
+  await window.api.saveSettings({ enableRotor: rotorEnabled });
 });
 
 openSettingsBtn.addEventListener('click', () => {
@@ -6689,7 +6711,7 @@ settingsSave.addEventListener('click', async () => {
   const hideOob = setHideOutOfBand.checked;
   const hideWorkedEnabled = setHideWorked.checked;
   const tuneClickEnabled = setTuneClick.checked;
-  const rotorEnabled = setEnableRotor.checked;
+  const rotorEnabledVal = setEnableRotor.checked;
   const rotorHostVal = setRotorHost.value.trim() || '127.0.0.1';
   const rotorPortVal = parseInt(setRotorPort.value, 10) || 12040;
   const agEnabled = setEnableAg.checked;
@@ -6808,7 +6830,7 @@ settingsSave.addEventListener('click', async () => {
     hideOutOfBand: hideOob,
     hideWorked: hideWorkedEnabled,
     tuneClick: tuneClickEnabled,
-    enableRotor: rotorEnabled,
+    enableRotor: rotorEnabledVal,
     rotorHost: rotorHostVal,
     rotorPort: rotorPortVal,
     enableAntennaGenius: agEnabled,
@@ -6885,6 +6907,11 @@ settingsSave.addEventListener('click', async () => {
   updateWsjtxStatusVisibility();
   updateRbnButton();
   updateDirectoryButton();
+  // Sync rotor status bar button
+  rotorEnabled = rotorEnabledVal;
+  if (rotorEnabledVal) rotorConfigured = true;
+  quickRotor.checked = rotorEnabledVal;
+  updateRotorStatusBtn();
   spotsTable.classList.toggle('no-source-tint', !colorRowsEnabled);
   applyColorblindMode(colorblindEnabled);
   applyWcagMode(wcagEnabled);

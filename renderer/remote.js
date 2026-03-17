@@ -102,6 +102,7 @@
   let rigCapabilities = { nb: false, atu: false, vfo: false, filter: false };
   let rigControlsOpen = false;
   let txState = false;
+  let rotorEnabled = false;
 
   // --- Colorblind mode ---
   const CB_COLORS = {
@@ -331,6 +332,27 @@
   const rcVfoA = document.getElementById('rc-vfo-a');
   const rcVfoB = document.getElementById('rc-vfo-b');
   const rcVfoSwap = document.getElementById('rc-vfo-swap');
+  const rcRotorGroup = document.getElementById('rc-rotor');
+  const rcRotorBtn = document.getElementById('rc-rotor-btn');
+
+  let rotorConfigured = false; // stays true once rotor has been seen enabled
+
+  function updateRotorBtn() {
+    if (!rcRotorGroup || !rcRotorBtn) return;
+    if (rotorEnabled) rotorConfigured = true;
+    rcRotorGroup.classList.toggle('hidden', !rotorConfigured);
+    rcRotorBtn.classList.toggle('active', rotorEnabled);
+  }
+
+  if (rcRotorBtn) {
+    rcRotorBtn.addEventListener('click', function() {
+      rotorEnabled = !rotorEnabled;
+      updateRotorBtn();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'toggle-rotor', enabled: rotorEnabled }));
+      }
+    });
+  }
 
   // Mode picker
   const modePicker = document.getElementById('mode-picker');
@@ -516,6 +538,11 @@
           soDistMi.classList.toggle('active', distUnit === 'mi');
           soDistKm.classList.toggle('active', distUnit === 'km');
           if (msg.settings.remoteCwMacros) syncMacrosFromSettings(msg.settings.remoteCwMacros);
+          // PSTRotator toggle
+          if (msg.settings.enableRotor != null) {
+            rotorEnabled = !!msg.settings.enableRotor;
+            updateRotorBtn();
+          }
         }
         updateCwEnableBtn();
         break;

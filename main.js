@@ -2230,6 +2230,7 @@ function updateRemoteSettings() {
     maxAgeMin: settings.maxAgeMin != null ? settings.maxAgeMin : 5,
     distUnit: settings.distUnit || 'mi',
     cwXit: settings.cwXit || 0,
+    enableRotor: !!settings.enableRotor,
     remoteCwEnabled: !!(settings.piAccess && settings.remoteCwEnabled),
     remoteCwMacros: settings.remoteCwMacros || null,
   });
@@ -2742,6 +2743,13 @@ function connectRemote() {
     // Reset rate limiter so mode-only change goes through
     _lastTuneFreq = 0;
     tuneRadio(_currentFreqHz / 1000, mode);
+  });
+
+  remoteServer.on('toggle-rotor', ({ enabled }) => {
+    settings.enableRotor = enabled;
+    saveSettings(settings);
+    updateRemoteSettings(); // push updated state back to phone
+    console.log('[Echo CAT] Rotor →', enabled ? 'ON' : 'OFF');
   });
 
   remoteServer.on('set-scan-dwell', ({ value }) => {
