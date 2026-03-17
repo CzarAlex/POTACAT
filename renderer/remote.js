@@ -2442,6 +2442,9 @@
     pttBtn.style.display = tab === 'ft8' ? 'none' : '';
     // Hide entire bottom bar (Audio/PTT/STOP) on FT8 tab — no voice audio needed
     bottomBar.style.display = tab === 'ft8' ? 'none' : '';
+    // Hide CW panel on tabs where it's not relevant
+    var cwTabs = { spots: 1, map: 1, log: 1, activate: 1 };
+    if (cwAvailable) cwPanel.classList.toggle('hidden', !cwTabs[tab]);
     if (tab === 'spots') {
       spotList.classList.remove('hidden');
       filterToolbar.classList.remove('hidden');
