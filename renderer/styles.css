@@ -5433,6 +5433,12 @@ body.activator-rbn-on #rbn-view {
   flex-shrink: 0;
 }
 .banner-logger.hidden { display: none; }
+
+/* Push overlays above the banner logger when it's visible */
+main.banner-logger-active #parks-stats-overlay,
+main.banner-logger-active #event-progress-overlay {
+  bottom: 48px;
+}
 .bl-field {
   font-size: 12px;
   font-family: monospace;

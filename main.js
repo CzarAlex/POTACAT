@@ -663,9 +663,9 @@ function connectCluster() {
   if (!settings.clusterNodes) {
     migrateClusterNodes();
   }
-  // Force piAccess off on upgrade — users must re-authorize via π
-  if (settings.piAccess !== false && settings.piAccess !== true) {
-    settings.piAccess = false;
+  // piAccess gate removed — CW keyer, JTCAT, and remote CW are now public
+  if (!settings.piAccess) {
+    settings.piAccess = true;
     saveSettings(settings);
   }
 
@@ -2010,8 +2010,8 @@ function needsSmartSdr() {
   // WSJT-X is active with a Flex, ECHOCAT remote needs rig controls,
   // or CW XIT offset is configured (XIT is applied via SmartSDR slice commands)
   if (settings.smartSdrSpots) return true;
-  if (settings.piAccess && settings.enableCwKeyer) return true;
-  if (settings.piAccess && settings.enableRemote && settings.remoteCwEnabled) return true;
+  if (settings.enableCwKeyer) return true;
+  if (settings.enableRemote && settings.remoteCwEnabled) return true;
   if (settings.enableWsjtx && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.enableRemote && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.cwXit && settings.catTarget && settings.catTarget.type === 'tcp') return true;
@@ -2033,7 +2033,7 @@ function connectSmartSdr() {
   }
   smartSdr.setPersistentId(settings.smartSdrClientId);
   // Tell SmartSDR whether CW keyer needs GUI auth
-  smartSdr.setNeedsCw(!!(settings.piAccess && (settings.enableCwKeyer || (settings.enableRemote && settings.remoteCwEnabled))));
+  smartSdr.setNeedsCw(!!(settings.enableCwKeyer || (settings.enableRemote && settings.remoteCwEnabled)));
   // Bind to GUI client for ECHOCAT rig controls (ATU, etc.)
   smartSdr.setNeedsBind(!!settings.enableRemote);
   // Log CW auth results
@@ -2240,7 +2240,7 @@ function updateRemoteSettings() {
     cwXit: settings.cwXit || 0,
     enableRotor: !!settings.enableRotor,
     rotorActive: settings.rotorActive !== false,
-    remoteCwEnabled: !!(settings.piAccess && settings.remoteCwEnabled),
+    remoteCwEnabled: !!settings.remoteCwEnabled,
     remoteCwMacros: settings.remoteCwMacros || null,
   });
 }
@@ -2248,7 +2248,7 @@ function updateRemoteSettings() {
 // --- CW Key Port (dedicated DTR keying via external USB-serial adapter) ---
 function connectCwKeyPort() {
   disconnectCwKeyPort();
-  if (!settings.piAccess) return; // CW key port requires pi access
+  // CW key port for external DTR keying
   const portPath = settings.cwKeyPort;
   if (!portPath) return;
   const { SerialPort } = require('serialport');
@@ -2429,14 +2429,14 @@ function connectRemote() {
     // Substitute {MYCALL} with the user's callsign
     const expanded = text.replace(/\{MYCALL\}/gi, settings.myCallsign || '');
     console.log(`[Echo CAT] CW text: ${expanded}`);
-    // Serial CAT (QMX/QDX/Kenwood): use KY command
+    // FlexRadio: use SmartSDR `cw send` command
+    if (detectRigType() === 'flex' && smartSdr && smartSdr.connected) {
+      smartSdr.sendCwText(expanded);
+    }
+    // Serial CAT (Kenwood/Yaesu/Icom): use KY or CI-V 0x17 command
     if (cat && cat.connected) {
       cat.sendCwText(expanded);
     }
-    // SmartSDR: use cw send command (Flex supports text sending too)
-    // Note: SmartSDR's `cw send` is character-level like KY
-    // For now, route through CAT. If no CAT but SmartSDR, we could add
-    // smartSdr.sendCwText() in the future.
   });
 
   // Phone requests to toggle remote CW on/off
@@ -7789,20 +7789,16 @@ app.whenReady().then(() => {
   // --- CW Keyer IPC ---
   // Paddle events go through IambicKeyer, which generates key events → xmit 1/0
   ipcMain.on('cw-paddle-dit', (_e, pressed) => {
-    if (!settings.piAccess) return;
     if (keyer) keyer.paddleDit(pressed);
   });
   ipcMain.on('cw-paddle-dah', (_e, pressed) => {
-    if (!settings.piAccess) return;
     if (keyer) keyer.paddleDah(pressed);
   });
   ipcMain.on('cw-set-wpm', (_e, wpm) => {
-    if (!settings.piAccess) return;
     if (keyer) keyer.setWpm(wpm);
     if (smartSdr && smartSdr.connected) smartSdr.setCwSpeed(wpm);
   });
   ipcMain.on('cw-stop', () => {
-    if (!settings.piAccess) return;
     if (keyer) keyer.stop();
     if (smartSdr && smartSdr.connected) smartSdr.cwStop();
   });

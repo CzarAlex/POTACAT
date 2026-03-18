@@ -882,7 +882,7 @@ async function loadPrefs() {
   enableWsjtx = settings.enableWsjtx === true;
   updateWsjtxStatusVisibility();
   // CW Keyer: init MIDI + connect saved device on load (requires pi access)
-  if (settings.piAccess && settings.enableCwKeyer) {
+  if (settings.enableCwKeyer) {
     cwKeyerStatusEl.classList.remove('hidden');
     populateMidiDevices().then(() => {
       if (settings.cwMidiDevice) connectMidiDevice(settings.cwMidiDevice);
@@ -899,7 +899,7 @@ async function loadPrefs() {
   updateDxccButton();
   updateDirectoryButton();
   // Pi access — JTCAT button visibility on startup
-  if (jtcatBtn) jtcatBtn.classList.toggle('hidden', !settings.piAccess);
+  if (jtcatBtn) jtcatBtn.classList.remove('hidden');
   // Activator mode restore
   if (settings.appMode === 'activator') {
     appMode = 'activator';
@@ -1770,6 +1770,7 @@ let blLookupTimer = null;
 function updateBannerLoggerVisibility() {
   const show = enableBannerLogger && enableLogging && appMode === 'hunter';
   bannerLoggerEl.classList.toggle('hidden', !show);
+  document.querySelector('main').classList.toggle('banner-logger-active', show);
   if (show && !blClockTimer) {
     updateBlClock();
     blClockTimer = setInterval(updateBlClock, 1000);
@@ -9861,12 +9862,12 @@ const piGatedEls = document.querySelectorAll('.pi-gated');
 const jtcatBtn = document.getElementById('view-jtcat-btn');
 let piUnlocked = false;
 
-function applyPiAccess(unlocked) {
-  piUnlocked = unlocked;
+function applyPiAccess(_unlocked) {
+  piUnlocked = true; // CW keyer, JTCAT, and remote CW are now public
   for (const el of piGatedEls) {
-    el.classList.toggle('hidden', !unlocked);
+    el.classList.remove('hidden');
   }
-  if (jtcatBtn) jtcatBtn.classList.toggle('hidden', !unlocked);
+  if (jtcatBtn) jtcatBtn.classList.remove('hidden');
 }
 
 piAccessEl.addEventListener('click', (e) => {

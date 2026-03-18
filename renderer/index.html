@@ -154,7 +154,7 @@
         <button id="view-rbn-btn" class="view-btn hidden" title="Propagation — RBN &amp; PSKReporter">Propagation</button>
         <button id="cluster-terminal-btn" class="view-btn hidden" title="DX Cluster Terminal">Terminal</button>
         <button id="view-directory-btn" class="view-btn hidden" title="HF Nets &amp; SWL Broadcast Directory">Directory</button>
-        <button id="view-jtcat-btn" class="view-btn hidden" title="JTCAT — FT8/FT4 Digital Modes">JTCAT</button>
+        <button id="view-jtcat-btn" class="view-btn" title="JTCAT — FT8/FT4 Digital Modes">JTCAT</button>
       </div>
     </div>
     <div class="status-bar">
@@ -1565,7 +1565,7 @@
             <input type="number" id="set-remote-ptt-timeout" min="30" max="600" value="180" style="width:70px;">
           </label>
         </div>
-        <div class="pi-gated hidden">
+        <div>
           <label class="checkbox-label" style="margin-top:8px;"><input type="checkbox" id="set-remote-cw-enabled"> Enable Remote CW Keyer</label>
           <span class="help-text" style="margin-left:12px;display:block;">Send CW via paddle from phone (TinyMIDI / keyboard). Requires SmartSDR (FlexRadio) or CW Key Port.</span>
           <div style="margin-top:6px;margin-left:12px;">

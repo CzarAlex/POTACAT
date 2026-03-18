@@ -4225,19 +4225,46 @@
 
   // --- Screen Wake Lock (keep phone screen on while connected) ---
   var wakeLock = null;
+  var wakeLockVideo = null; // iOS fallback: silent video loop
 
   async function requestWakeLock() {
-    if (!('wakeLock' in navigator)) return; // not supported
+    // Try the standard Screen Wake Lock API first
+    if ('wakeLock' in navigator) {
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', function() { wakeLock = null; });
+        console.log('[WakeLock] Screen Wake Lock acquired');
+        return; // success — no need for fallback
+      } catch (e) {
+        console.log('[WakeLock] API request failed:', e.message);
+      }
+    }
+    // iOS fallback: use a hidden video element with a MediaStream from a canvas.
+    // iOS Safari won't sleep the screen while a video with a live source is playing.
+    if (!wakeLockVideo) {
+      var canvas = document.createElement('canvas');
+      canvas.width = 1; canvas.height = 1;
+      wakeLockVideo = document.createElement('video');
+      wakeLockVideo.setAttribute('playsinline', '');
+      wakeLockVideo.setAttribute('muted', '');
+      wakeLockVideo.muted = true;
+      wakeLockVideo.style.cssText = 'position:fixed;top:-1px;left:-1px;width:1px;height:1px;opacity:0.01;pointer-events:none;';
+      if (canvas.captureStream) {
+        wakeLockVideo.srcObject = canvas.captureStream(1);  // 1 FPS
+      }
+      document.body.appendChild(wakeLockVideo);
+    }
     try {
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', function() { wakeLock = null; });
+      await wakeLockVideo.play();
+      console.log('[WakeLock] iOS canvas-stream fallback active');
     } catch (e) {
-      // Wake lock request can fail if page is hidden or permission denied
+      console.log('[WakeLock] iOS fallback failed:', e.message);
     }
   }
 
   function releaseWakeLock() {
     if (wakeLock) { wakeLock.release().catch(function() {}); wakeLock = null; }
+    if (wakeLockVideo) { wakeLockVideo.pause(); }
   }
 
   // Re-acquire wake lock when page becomes visible again (OS may release it on tab switch)
