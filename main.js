@@ -279,13 +279,18 @@ function findRigctld() {
   }
 
   // Fall back to PATH (just the bare name — execFile will search PATH)
+  console.log('[hamlib] rigctld not found at bundled or system paths — falling back to PATH');
   return 'rigctld';
 }
 
 function listRigs(rigctldPath) {
   return new Promise((resolve, reject) => {
     execFile(rigctldPath, ['-l'], { timeout: 10000 }, (err, stdout) => {
-      if (err) return reject(err);
+      if (err) {
+        console.error('[hamlib] rigctld -l failed:', err.message);
+        sendCatLog(`[hamlib] rigctld not found or failed: ${err.message}. On Linux, install hamlib: sudo apt install libhamlib-utils`);
+        return reject(err);
+      }
       const lines = stdout.split('\n');
       const rigs = [];
       const SKIP_IDS = new Set([1, 2, 6]);
