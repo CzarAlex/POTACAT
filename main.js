@@ -382,6 +382,7 @@ function spawnRigctld(target, portOverride) {
 
 function sendCatStatus(s) {
   if (win && !win.isDestroyed()) win.webContents.send('cat-status', s);
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) jtcatPopoutWin.webContents.send('cat-status', s);
   // If CAT disconnected while ECHOCAT PTT was active, force-release PTT
   // and notify the phone so it can update its UI state
   if (!s.connected && _remoteTxState && remoteServer && remoteServer.running) {

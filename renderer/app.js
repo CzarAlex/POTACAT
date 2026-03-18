@@ -7135,6 +7135,19 @@ function syncActivatorCatPill(className, title) {
 
 window.api.onCatStatus(({ connected, error, wsjtxMode }) => {
   catConnected = connected;
+  // Update JTCAT PTT mode indicator
+  const pttModeEl = document.getElementById('jtcat-ptt-mode');
+  if (pttModeEl) {
+    if (connected || wsjtxMode) {
+      pttModeEl.textContent = 'PTT: CAT';
+      pttModeEl.classList.remove('vox');
+      pttModeEl.title = 'PTT via CAT command — radio switches TX/RX automatically';
+    } else {
+      pttModeEl.textContent = 'PTT: VOX';
+      pttModeEl.classList.add('vox');
+      pttModeEl.title = 'No CAT connected — enable VOX on your radio. Audio tones trigger TX.';
+    }
+  }
   if (wsjtxMode) {
     if (catDisconnectTimer) { clearTimeout(catDisconnectTimer); catDisconnectTimer = null; }
     catStatusEl.textContent = 'CAT';

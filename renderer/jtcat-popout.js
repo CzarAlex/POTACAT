@@ -497,6 +497,25 @@
     syncEl.textContent = 'Sync: ' + (data.sync || '--');
   });
 
+  // PTT mode indicator (CAT vs VOX)
+  var pttModeEl = document.getElementById('jp-ptt-mode');
+  if (window.api.onCatStatus) {
+    window.api.onCatStatus(function(s) {
+      if (!pttModeEl) return;
+      if (s.connected || s.wsjtxMode) {
+        pttModeEl.textContent = 'PTT: CAT';
+        pttModeEl.style.background = '#333';
+        pttModeEl.style.color = '#aaa';
+        pttModeEl.title = 'PTT via CAT command';
+      } else {
+        pttModeEl.textContent = 'PTT: VOX';
+        pttModeEl.style.background = '#f0a500';
+        pttModeEl.style.color = '#000';
+        pttModeEl.title = 'No CAT connected — enable VOX on your radio';
+      }
+    });
+  }
+
   window.api.onJtcatTxStatus(function(data) {
     transmitting = data.state === 'tx';
     rxTxEl.textContent = transmitting ? 'TX' : 'RX';

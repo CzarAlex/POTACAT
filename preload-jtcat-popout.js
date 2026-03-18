@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   onJtcatTxStatus: (cb) => ipcRenderer.on('jtcat-tx-status', (_e, data) => cb(data)),
   onJtcatQsoState: (cb) => ipcRenderer.on('jtcat-qso-state', (_e, data) => cb(data)),
   onJtcatQsoLogged: (cb) => ipcRenderer.on('jtcat-qso-logged', (_e, data) => cb(data)),
+  onCatStatus: (cb) => ipcRenderer.on('cat-status', (_e, s) => cb(s)),
   // QSO commands (relayed to main renderer)
   jtcatReply: (data) => ipcRenderer.send('jtcat-popout-reply', data),
   jtcatCallCq: (modifier) => ipcRenderer.send('jtcat-popout-call-cq', modifier || ''),
