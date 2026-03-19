@@ -2303,6 +2303,11 @@ function connectRemote() {
     console.log('[Echo CAT] Tune request:', freqKhz, 'kHz, mode:', mode || '(keep)');
     // Only clear XIT for manual freq entry (no mode); apply CW XIT for spot clicks
     tuneRadio(freqKhz, mode, bearing, { clearXit: !mode });
+    // Force TX to the tuned slice (Flex multi-slice: user may have TX on a different slice)
+    if (smartSdr && smartSdr.connected && settings.catTarget && settings.catTarget.type === 'tcp') {
+      const sliceIndex = (settings.catTarget.port || 5002) - 5002;
+      smartSdr.setTxSlice(sliceIndex);
+    }
   });
 
   remoteServer.on('ptt', ({ state }) => {
