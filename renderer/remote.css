@@ -1154,6 +1154,116 @@ html, body {
 [data-theme="light"] .cw-text-input { background: #f5f5f5; border-color: #bbb; color: #333; }
 [data-theme="light"] .so-macro-label, [data-theme="light"] .so-macro-text { background: #f5f5f5; border-color: #bbb; color: #333; }
 
+/* --- SSB Voice Macro Panel --- */
+#ssb-panel {
+  background: var(--bg-header);
+  border-top: 1px solid #333;
+  padding: 6px 12px;
+  flex-shrink: 0;
+}
+
+.ssb-macro-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ssb-macro-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: #333;
+  color: var(--text);
+  border: 1px solid #555;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  min-width: 40px;
+  text-align: center;
+  position: relative;
+}
+
+.ssb-macro-btn:active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.ssb-macro-btn.playing {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.ssb-macro-btn .ssb-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: rgba(255,255,255,0.6);
+  border-radius: 0 0 6px 6px;
+  transition: width 0.1s linear;
+}
+
+/* SSB macro editor in settings */
+.so-ssb-macros { padding: 0 0 4px 0; }
+
+.so-ssb-macro-edit {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0 !important;
+  align-items: center;
+}
+
+.so-ssb-rec-btn, .so-ssb-play-btn, .so-ssb-del-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #555;
+  background: #333;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.so-ssb-rec-btn:active, .so-ssb-play-btn:active { opacity: 0.8; }
+
+.so-ssb-rec-btn.recording {
+  background: #e94560;
+  color: white;
+  border-color: #e94560;
+  animation: rec-pulse 1s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.so-ssb-play-btn:disabled, .so-ssb-del-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.so-ssb-duration {
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 28px;
+  text-align: center;
+}
+
+.so-ssb-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin: 4px 0 0 0;
+  padding: 0;
+}
+
+[data-theme="light"] #ssb-panel { border-top-color: #ddd; }
+[data-theme="light"] .ssb-macro-btn { background: #ddd; border-color: #bbb; color: #333; }
+[data-theme="light"] .so-ssb-rec-btn, [data-theme="light"] .so-ssb-play-btn, [data-theme="light"] .so-ssb-del-btn { background: #ddd; border-color: #bbb; color: #333; }
+
 /* --- Spot Card Log Button --- */
 .spot-log-btn {
   flex-shrink: 0;

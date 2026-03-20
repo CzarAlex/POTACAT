@@ -254,6 +254,47 @@
           </div>
         </div>
 
+        <!-- SSB Voice Macros -->
+        <div class="so-section-label">Voice Macros</div>
+        <div id="so-ssb-macros" class="so-ssb-macros">
+          <div class="so-row so-ssb-macro-edit" id="so-ssb-1">
+            <input type="text" class="so-macro-label" placeholder="Label" maxlength="6">
+            <button type="button" class="so-ssb-rec-btn" title="Record">Rec</button>
+            <span class="so-ssb-duration">--</span>
+            <button type="button" class="so-ssb-play-btn" title="Preview" disabled>Play</button>
+            <button type="button" class="so-ssb-del-btn" title="Delete" disabled>Del</button>
+          </div>
+          <div class="so-row so-ssb-macro-edit" id="so-ssb-2">
+            <input type="text" class="so-macro-label" placeholder="Label" maxlength="6">
+            <button type="button" class="so-ssb-rec-btn" title="Record">Rec</button>
+            <span class="so-ssb-duration">--</span>
+            <button type="button" class="so-ssb-play-btn" title="Preview" disabled>Play</button>
+            <button type="button" class="so-ssb-del-btn" title="Delete" disabled>Del</button>
+          </div>
+          <div class="so-row so-ssb-macro-edit" id="so-ssb-3">
+            <input type="text" class="so-macro-label" placeholder="Label" maxlength="6">
+            <button type="button" class="so-ssb-rec-btn" title="Record">Rec</button>
+            <span class="so-ssb-duration">--</span>
+            <button type="button" class="so-ssb-play-btn" title="Preview" disabled>Play</button>
+            <button type="button" class="so-ssb-del-btn" title="Delete" disabled>Del</button>
+          </div>
+          <div class="so-row so-ssb-macro-edit" id="so-ssb-4">
+            <input type="text" class="so-macro-label" placeholder="Label" maxlength="6">
+            <button type="button" class="so-ssb-rec-btn" title="Record">Rec</button>
+            <span class="so-ssb-duration">--</span>
+            <button type="button" class="so-ssb-play-btn" title="Preview" disabled>Play</button>
+            <button type="button" class="so-ssb-del-btn" title="Delete" disabled>Del</button>
+          </div>
+          <div class="so-row so-ssb-macro-edit" id="so-ssb-5">
+            <input type="text" class="so-macro-label" placeholder="Label" maxlength="6">
+            <button type="button" class="so-ssb-rec-btn" title="Record">Rec</button>
+            <span class="so-ssb-duration">--</span>
+            <button type="button" class="so-ssb-play-btn" title="Preview" disabled>Play</button>
+            <button type="button" class="so-ssb-del-btn" title="Delete" disabled>Del</button>
+          </div>
+          <p class="so-ssb-hint">Record mic audio to play as voice macros during PTT. Max 30s each.</p>
+        </div>
+
         <div class="so-footer">
           <div class="so-footer-by">Casey Stanton, K3SBP</div>
           <div class="so-footer-links">
@@ -550,6 +591,11 @@
                autocapitalize="characters" autocorrect="off" spellcheck="false">
         <button type="button" id="cw-text-send" class="cw-text-send">Send</button>
       </div>
+    </div>
+
+    <!-- SSB Macro panel (shown when voice mode: USB/LSB/FM/AM) -->
+    <div id="ssb-panel" class="hidden">
+      <div class="ssb-macro-row" id="ssb-macro-row"></div>
     </div>
 
     <!-- Bottom controls -->

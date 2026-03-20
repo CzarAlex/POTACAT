@@ -525,6 +525,7 @@
         // CW keyer availability
         cwAvailable = !!msg.cwAvailable;
         updateCwPanelVisibility();
+        updateSsbPanelVisibility();
         if (msg.settings) {
           myCallsign = msg.settings.myCallsign || '';
           phoneGrid = msg.settings.grid || phoneGrid;
@@ -832,6 +833,7 @@
       pttBtn.classList.toggle('hidden', !isVoice);
       estopBtn.classList.toggle('hidden', !isVoice);
       updateCwPanelVisibility();
+      updateSsbPanelVisibility();
     }
     if (s.catConnected !== undefined) {
       catDot.classList.toggle('connected', s.catConnected);
@@ -1476,6 +1478,11 @@
   }
 
   function pttStart() {
+    // If SSB macro is playing and user presses PTT manually, cancel macro and go live
+    if (typeof ssbPlayingIdx !== 'undefined' && ssbPlayingIdx >= 0) {
+      stopSsbPlayback();
+      return;
+    }
     if (pttDown) return;
     pttDown = true;
     pttBtn.classList.add('active');
@@ -1521,6 +1528,7 @@
   }
 
   estopBtn.addEventListener('click', () => {
+    if (typeof ssbPlayingIdx !== 'undefined' && ssbPlayingIdx >= 0) stopSsbPlayback();
     pttDown = false;
     pttBtn.classList.remove('active');
     txBanner.classList.add('hidden');
@@ -1746,13 +1754,13 @@
 
   document.getElementById('rc-power-on').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'rig-control', action: 'power-on' }));
+      ws.send(JSON.stringify({ type: 'rig-control', data: { action: 'power-on' } }));
     }
   });
 
   document.getElementById('rc-power-off').addEventListener('click', () => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'rig-control', action: 'power-off' }));
+      ws.send(JSON.stringify({ type: 'rig-control', data: { action: 'power-off' } }));
     }
   });
 
@@ -1898,6 +1906,7 @@
       audioBtn.classList.add('active');
       audioDot.classList.remove('hidden');
       volBoostBtn.classList.remove('hidden');
+      updateSsbPanelVisibility();
       // Activate Media Session so earbud play/pause button works for PTT
       startSessionKeepAlive();
       if ('mediaSession' in navigator) {
@@ -1911,6 +1920,7 @@
   }
 
   function stopAudio() {
+    if (ssbPlayingIdx >= 0) stopSsbPlayback();
     if (pc) { pc.close(); pc = null; }
     if (localAudioStream) { localAudioStream.getTracks().forEach(t => t.stop()); localAudioStream = null; }
     if (remoteAudio) { remoteAudio.srcObject = null; }
@@ -1926,6 +1936,7 @@
     audioDot.classList.add('hidden');
     audioDot.classList.remove('connected');
     setAudioStatus('Audio');
+    updateSsbPanelVisibility();
   }
 
   async function handleSignal(data) {
@@ -2460,8 +2471,9 @@
     pttBtn.style.display = tab === 'ft8' ? 'none' : '';
     // Hide entire bottom bar (Audio/PTT/STOP) on FT8 tab — no voice audio needed
     bottomBar.style.display = tab === 'ft8' ? 'none' : '';
-    // Hide CW panel on tabs where it's not relevant (also gated on CW mode)
+    // Hide CW/SSB panels on tabs where they're not relevant
     updateCwPanelVisibility();
+    updateSsbPanelVisibility();
     if (tab === 'spots') {
       spotList.classList.remove('hidden');
       filterToolbar.classList.remove('hidden');
@@ -4101,6 +4113,382 @@
       sendPaddle('dah', 0);
     }
   });
+
+  // --- SSB Voice Macros ---
+  var SSB_MACRO_COUNT = 5;
+  var SSB_MAX_DURATION = 30; // seconds
+  var ssbMacroLabels = JSON.parse(localStorage.getItem('echocat-ssb-labels') || 'null') || ['CQ', 'ID', '73', '', ''];
+  var ssbPanel = document.getElementById('ssb-panel');
+  var ssbMacroRow = document.getElementById('ssb-macro-row');
+  var ssbDb = null; // IndexedDB instance
+  var ssbPlayingIdx = -1; // which macro is currently playing (-1 = none)
+  var ssbPlaybackSource = null; // AudioBufferSourceNode
+  var ssbPlaybackDest = null; // MediaStreamAudioDestinationNode
+  var ssbPlaybackTimer = null;
+  var ssbOrigTrack = null; // original mic track to restore after playback
+  var ssbRecorder = null; // active MediaRecorder
+
+  // Open IndexedDB for audio storage
+  function openSsbDb(cb) {
+    if (ssbDb) return cb(ssbDb);
+    var req = indexedDB.open('echocat-ssb-macros', 1);
+    req.onupgradeneeded = function(e) {
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains('clips')) {
+        db.createObjectStore('clips');
+      }
+    };
+    req.onsuccess = function(e) { ssbDb = e.target.result; cb(ssbDb); };
+    req.onerror = function() { console.error('SSB macro DB error'); cb(null); };
+  }
+
+  function ssbDbPut(idx, blob, cb) {
+    openSsbDb(function(db) {
+      if (!db) return cb && cb(false);
+      var tx = db.transaction('clips', 'readwrite');
+      tx.objectStore('clips').put(blob, idx);
+      tx.oncomplete = function() { cb && cb(true); };
+      tx.onerror = function() { cb && cb(false); };
+    });
+  }
+
+  function ssbDbGet(idx, cb) {
+    openSsbDb(function(db) {
+      if (!db) return cb(null);
+      var tx = db.transaction('clips', 'readonly');
+      var req = tx.objectStore('clips').get(idx);
+      req.onsuccess = function() { cb(req.result || null); };
+      req.onerror = function() { cb(null); };
+    });
+  }
+
+  function ssbDbDelete(idx, cb) {
+    openSsbDb(function(db) {
+      if (!db) return cb && cb();
+      var tx = db.transaction('clips', 'readwrite');
+      tx.objectStore('clips').delete(idx);
+      tx.oncomplete = function() { cb && cb(); };
+    });
+  }
+
+  // Check which slots have recordings
+  function ssbCheckSlots(cb) {
+    openSsbDb(function(db) {
+      if (!db) return cb([]);
+      var tx = db.transaction('clips', 'readonly');
+      var store = tx.objectStore('clips');
+      var filled = [];
+      var remaining = SSB_MACRO_COUNT;
+      for (var i = 0; i < SSB_MACRO_COUNT; i++) {
+        (function(idx) {
+          var req = store.get(idx);
+          req.onsuccess = function() {
+            if (req.result) filled.push(idx);
+            remaining--;
+            if (remaining === 0) cb(filled);
+          };
+          req.onerror = function() {
+            remaining--;
+            if (remaining === 0) cb(filled);
+          };
+        })(i);
+      }
+    });
+  }
+
+  // Voice mode detection
+  function isVoiceMode(mode) {
+    var m = (mode || '').toUpperCase();
+    return m === 'USB' || m === 'LSB' || m === 'SSB' || m === 'FM' || m === 'AM';
+  }
+
+  function updateSsbPanelVisibility() {
+    var voiceTabs = { spots: 1, map: 1, log: 1, activate: 1 };
+    var show = isVoiceMode(currentMode) && !!voiceTabs[activeTab] && audioEnabled;
+    ssbPanel.classList.toggle('hidden', !show);
+  }
+
+  // Render SSB macro buttons in the panel
+  function renderSsbMacros() {
+    ssbMacroRow.innerHTML = '';
+    ssbCheckSlots(function(filled) {
+      for (var i = 0; i < SSB_MACRO_COUNT; i++) {
+        if (!ssbMacroLabels[i] && filled.indexOf(i) === -1) continue;
+        (function(idx) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ssb-macro-btn';
+          btn.textContent = ssbMacroLabels[idx] || ('V' + (idx + 1));
+          if (filled.indexOf(idx) === -1) {
+            btn.style.opacity = '0.3';
+            btn.title = 'No recording';
+          } else {
+            btn.title = 'Tap to play';
+            btn.addEventListener('click', function() {
+              if (ssbPlayingIdx === idx) {
+                stopSsbPlayback();
+              } else {
+                playSsbMacro(idx, btn);
+              }
+            });
+          }
+          // Progress bar element
+          var prog = document.createElement('div');
+          prog.className = 'ssb-progress';
+          prog.style.width = '0%';
+          btn.appendChild(prog);
+          ssbMacroRow.appendChild(btn);
+        })(i);
+      }
+    });
+  }
+
+  // Play an SSB macro: PTT on, swap audio track, play clip, PTT off
+  function playSsbMacro(idx, btn) {
+    if (ssbPlayingIdx >= 0) stopSsbPlayback();
+    if (!audioEnabled || !pc) return;
+
+    ssbDbGet(idx, function(blob) {
+      if (!blob) return;
+
+      // Decode audio
+      var reader = new FileReader();
+      reader.onload = function() {
+        var ctx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        ctx.decodeAudioData(reader.result, function(audioBuffer) {
+          ssbPlayingIdx = idx;
+          if (btn) btn.classList.add('playing');
+
+          // Create playback graph: AudioBuffer → MediaStreamDestination
+          ssbPlaybackDest = ctx.createMediaStreamDestination();
+          ssbPlaybackSource = ctx.createBufferSource();
+          ssbPlaybackSource.buffer = audioBuffer;
+          ssbPlaybackSource.connect(ssbPlaybackDest);
+
+          // Get the sender for our audio track
+          var senders = pc.getSenders();
+          var audioSender = null;
+          for (var s = 0; s < senders.length; s++) {
+            if (senders[s].track && senders[s].track.kind === 'audio') {
+              audioSender = senders[s];
+              break;
+            }
+          }
+
+          if (!audioSender) {
+            console.error('[SSB Macro] No audio sender on peer connection');
+            ssbPlayingIdx = -1;
+            if (btn) btn.classList.remove('playing');
+            return;
+          }
+
+          // Save original track to restore later
+          ssbOrigTrack = audioSender.track;
+
+          // Swap to playback track
+          var playTrack = ssbPlaybackDest.stream.getAudioTracks()[0];
+          audioSender.replaceTrack(playTrack).then(function() {
+            // Enable the playback track (it's new so enabled by default, but be explicit)
+            playTrack.enabled = true;
+
+            // Key PTT
+            pttStart();
+
+            // Start playback
+            ssbPlaybackSource.start(0);
+
+            // Progress animation
+            var duration = audioBuffer.duration;
+            var startTime = Date.now();
+            ssbPlaybackTimer = setInterval(function() {
+              var elapsed = (Date.now() - startTime) / 1000;
+              var pct = Math.min(100, (elapsed / duration) * 100);
+              var prog = btn ? btn.querySelector('.ssb-progress') : null;
+              if (prog) prog.style.width = pct + '%';
+            }, 100);
+
+            // Auto-stop when clip ends
+            ssbPlaybackSource.onended = function() {
+              stopSsbPlayback();
+            };
+          }).catch(function(err) {
+            console.error('[SSB Macro] replaceTrack failed:', err);
+            ssbPlayingIdx = -1;
+            if (btn) btn.classList.remove('playing');
+          });
+        }, function(err) {
+          console.error('[SSB Macro] decodeAudioData failed:', err);
+        });
+      };
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+
+  function stopSsbPlayback() {
+    if (ssbPlaybackTimer) { clearInterval(ssbPlaybackTimer); ssbPlaybackTimer = null; }
+    if (ssbPlaybackSource) {
+      try { ssbPlaybackSource.stop(); } catch(e) {}
+      ssbPlaybackSource = null;
+    }
+
+    // Restore original mic track
+    if (pc && ssbOrigTrack) {
+      var senders = pc.getSenders();
+      for (var s = 0; s < senders.length; s++) {
+        if (senders[s].track && senders[s].track.kind === 'audio') {
+          senders[s].replaceTrack(ssbOrigTrack).catch(function(e) {
+            console.error('[SSB Macro] restore track failed:', e);
+          });
+          break;
+        }
+      }
+      ssbOrigTrack = null;
+    }
+
+    // Unkey PTT
+    pttStop();
+
+    // Reset button state
+    var btns = ssbMacroRow.querySelectorAll('.ssb-macro-btn');
+    btns.forEach(function(b) {
+      b.classList.remove('playing');
+      var prog = b.querySelector('.ssb-progress');
+      if (prog) prog.style.width = '0%';
+    });
+
+    ssbPlayingIdx = -1;
+    ssbPlaybackDest = null;
+  }
+
+  // Initial render
+  renderSsbMacros();
+
+  // --- SSB Macro Recording (Settings) ---
+  function initSsbMacroEditor() {
+    ssbCheckSlots(function(filled) {
+      for (var i = 0; i < SSB_MACRO_COUNT; i++) {
+        (function(idx) {
+          var row = document.getElementById('so-ssb-' + (idx + 1));
+          if (!row) return;
+          var labelInput = row.querySelector('.so-macro-label');
+          var recBtn = row.querySelector('.so-ssb-rec-btn');
+          var durSpan = row.querySelector('.so-ssb-duration');
+          var playBtn = row.querySelector('.so-ssb-play-btn');
+          var delBtn = row.querySelector('.so-ssb-del-btn');
+
+          // Load label
+          labelInput.value = ssbMacroLabels[idx] || '';
+
+          var hasClip = filled.indexOf(idx) >= 0;
+          playBtn.disabled = !hasClip;
+          delBtn.disabled = !hasClip;
+
+          // Show duration if clip exists
+          if (hasClip) {
+            ssbDbGet(idx, function(blob) {
+              if (!blob) return;
+              durSpan.textContent = (blob.size / 1000).toFixed(0) + 'kB';
+              // Try to get actual duration
+              var url = URL.createObjectURL(blob);
+              var audio = new Audio();
+              audio.addEventListener('loadedmetadata', function() {
+                if (isFinite(audio.duration)) {
+                  durSpan.textContent = audio.duration.toFixed(1) + 's';
+                }
+                URL.revokeObjectURL(url);
+              });
+              audio.addEventListener('error', function() { URL.revokeObjectURL(url); });
+              audio.src = url;
+            });
+          } else {
+            durSpan.textContent = '--';
+          }
+
+          // Label auto-save
+          labelInput.addEventListener('change', function() {
+            ssbMacroLabels[idx] = (labelInput.value || '').trim();
+            localStorage.setItem('echocat-ssb-labels', JSON.stringify(ssbMacroLabels));
+            renderSsbMacros();
+          });
+
+          // Record button
+          recBtn.onclick = function() {
+            if (ssbRecorder && ssbRecorder.state === 'recording') {
+              // Stop recording
+              ssbRecorder.stop();
+              return;
+            }
+            // Start recording from mic
+            navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+            }).then(function(stream) {
+              var chunks = [];
+              var mimeType = getSsbMimeType();
+              ssbRecorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
+              ssbRecorder.ondataavailable = function(e) { if (e.data.size > 0) chunks.push(e.data); };
+              ssbRecorder.onstop = function() {
+                stream.getTracks().forEach(function(t) { t.stop(); });
+                recBtn.textContent = 'Rec';
+                recBtn.classList.remove('recording');
+                if (chunks.length === 0) return;
+                var blob = new Blob(chunks, { type: ssbRecorder.mimeType });
+                ssbDbPut(idx, blob, function() {
+                  initSsbMacroEditor();
+                  renderSsbMacros();
+                });
+              };
+              recBtn.textContent = 'Stop';
+              recBtn.classList.add('recording');
+              ssbRecorder.start();
+              // Auto-stop at max duration
+              setTimeout(function() {
+                if (ssbRecorder && ssbRecorder.state === 'recording') ssbRecorder.stop();
+              }, SSB_MAX_DURATION * 1000);
+            }).catch(function(err) {
+              console.error('[SSB Macro] Record error:', err);
+              alert('Could not access microphone: ' + err.message);
+            });
+          };
+
+          // Preview button
+          playBtn.onclick = function() {
+            ssbDbGet(idx, function(blob) {
+              if (!blob) return;
+              var url = URL.createObjectURL(blob);
+              var audio = new Audio(url);
+              audio.onended = function() { URL.revokeObjectURL(url); };
+              audio.play().catch(function() { URL.revokeObjectURL(url); });
+            });
+          };
+
+          // Delete button
+          delBtn.onclick = function() {
+            ssbDbDelete(idx, function() {
+              initSsbMacroEditor();
+              renderSsbMacros();
+            });
+          };
+        })(i);
+      }
+    });
+  }
+
+  function getSsbMimeType() {
+    // Safari uses mp4/aac, Chrome uses webm/opus
+    if (typeof MediaRecorder !== 'undefined') {
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+      if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
+    }
+    return '';
+  }
+
+  // Load SSB editor when settings opened
+  if (origRigToggle) {
+    origRigToggle.addEventListener('click', function() {
+      initSsbMacroEditor();
+    });
+  }
 
   // --- Directory (HF Nets & SWL) ---
   function freqToBandDir(khz) {
