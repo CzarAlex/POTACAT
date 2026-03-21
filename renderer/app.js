@@ -933,7 +933,6 @@ async function loadPrefs() {
   updateRbnButton();
   clusterTerminalBtn.classList.toggle('hidden', !settings.enableClusterTerminal);
   updateDxccButton();
-  updateDirectoryButton();
   // Pi access — JTCAT button visibility on startup
   if (jtcatBtn) jtcatBtn.classList.remove('hidden');
   // Activator mode restore
@@ -6664,6 +6663,7 @@ async function openSettingsDialog(tab) {
   // Directory opt-in
   setEnableDirectory.checked = s.enableDirectory === true;
   dirControls.classList.toggle('hidden', !s.enableDirectory);
+  updateDirectoryButton();
   if (dirBrowser) dirBrowser.classList.add('hidden');
   if (dirBrowseBtn) dirBrowseBtn.classList.remove('hidden');
   clusterConfig.classList.toggle('hidden', !s.enableCluster);
