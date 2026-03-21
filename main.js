@@ -7525,7 +7525,10 @@ app.whenReady().then(() => {
   });
 
   // --- JTCAT IPC ---
-  ipcMain.on('jtcat-start', (_e, mode) => startJtcat(mode));
+  ipcMain.on('jtcat-start', (_e, mode) => {
+    console.log('[JTCAT] jtcat-start IPC received, mode:', mode);
+    startJtcat(mode);
+  });
   ipcMain.on('jtcat-stop', () => stopJtcat());
   ipcMain.on('jtcat-set-mode', (_e, mode) => { if (ft8Engine) ft8Engine.setMode(mode); });
   ipcMain.on('jtcat-set-tx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setTxFreq(hz); });
@@ -7545,7 +7548,12 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-log', (_e, msg) => {
     console.log(msg);
   });
+  let _jtcatAudioCount = 0;
   ipcMain.on('jtcat-audio', (_e, buf) => {
+    _jtcatAudioCount++;
+    if (_jtcatAudioCount <= 3 || _jtcatAudioCount % 100 === 0) {
+      console.log('[JTCAT] jtcat-audio IPC #' + _jtcatAudioCount + ' len=' + (buf ? buf.length : 0));
+    }
     if (ft8Engine) ft8Engine.feedAudio(new Float32Array(buf));
   });
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {
