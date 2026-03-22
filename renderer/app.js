@@ -12738,9 +12738,7 @@ var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq update
 var jtcatSpectrumFrame = 0;    // frame counter for throttling spectrum IPC to ~10fps
 
 async function startJtcatAudio() {
-  function jtLog(msg) { console.log(msg); try { window.api.jtcatLog && window.api.jtcatLog(msg); } catch(e){} }
   try {
-    jtLog('[JTCAT AUDIO] startJtcatAudio() called');
     var s = await window.api.getSettings();
     var audioConstraints = {
       channelCount: 1,
@@ -12751,37 +12749,21 @@ async function startJtcatAudio() {
     // Use the same audio input device as ECHOCAT (remoteAudioInput)
     if (s.remoteAudioInput) {
       audioConstraints.deviceId = { exact: s.remoteAudioInput };
-      jtLog('[JTCAT AUDIO] Using configured audio input: ' + s.remoteAudioInput);
-    } else {
-      jtLog('[JTCAT AUDIO] No audio input configured, using default');
     }
-    // List available devices for diagnostics
-    try {
-      var devices = await navigator.mediaDevices.enumerateDevices();
-      var audioInputs = devices.filter(function(d) { return d.kind === 'audioinput'; });
-      jtLog('[JTCAT AUDIO] Available inputs: ' + audioInputs.map(function(d) { return d.label + ' [' + d.deviceId.slice(0,8) + ']'; }).join(', '));
-    } catch(e) { jtLog('[JTCAT AUDIO] enumerateDevices error: ' + e.message); }
     try {
       jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch (e) {
       // Fall back to default device if configured one fails
-      jtLog('[JTCAT AUDIO] Configured input failed: ' + e.message + ', trying default');
+      console.warn('[JTCAT] Configured audio input not found, using default:', e.message);
       delete audioConstraints.deviceId;
       jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     }
-    var audioTrack = jtcatAudioStream.getAudioTracks()[0];
-    jtLog('[JTCAT AUDIO] Got track: ' + (audioTrack ? audioTrack.label : 'NONE') +
-          ' state=' + (audioTrack ? audioTrack.readyState : 'N/A') +
-          ' enabled=' + (audioTrack ? audioTrack.enabled : 'N/A') +
-          ' muted=' + (audioTrack ? audioTrack.muted : 'N/A'));
 
-    // Use native sample rate — Chromium 142 doesn't properly resample cross-rate
-    // MediaStreamSource inputs. We'll downsample to 12kHz in the processor callback.
+    // Use native sample rate — Chromium 142 doesn't properly handle cross-rate
+    // MediaStreamSource inputs. We downsample to 12kHz in the processor callback.
     jtcatAudioCtx = new AudioContext();
-    jtLog('[JTCAT AUDIO] AudioContext state=' + jtcatAudioCtx.state + ' sampleRate=' + jtcatAudioCtx.sampleRate);
     if (jtcatAudioCtx.state === 'suspended') {
       await jtcatAudioCtx.resume();
-      jtLog('[JTCAT AUDIO] After resume: state=' + jtcatAudioCtx.state);
     }
     var source = jtcatAudioCtx.createMediaStreamSource(jtcatAudioStream);
 
@@ -12794,17 +12776,13 @@ async function startJtcatAudio() {
     // ScriptProcessorNode captures at native sample rate; downsample to 12kHz for FT8 decoder
     var nativeRate = jtcatAudioCtx.sampleRate;
     var dsRatio = nativeRate / 12000;
-    jtLog('[JTCAT AUDIO] Native rate=' + nativeRate + ' downsample ratio=' + dsRatio.toFixed(2));
     var bufSize = dsRatio > 1 ? 4096 * Math.ceil(dsRatio) : 4096;
-    // Round up to power of 2
     bufSize = Math.pow(2, Math.ceil(Math.log2(bufSize)));
     if (bufSize > 16384) bufSize = 16384;
     jtcatAudioProcessor = jtcatAudioCtx.createScriptProcessor(bufSize, 1, 1);
-    var _jtcatAudioCallbackCount = 0;
     jtcatAudioProcessor.onaudioprocess = function(e) {
       try {
         var rawSamples = e.inputBuffer.getChannelData(0);
-        _jtcatAudioCallbackCount++;
         // Downsample to 12kHz if needed
         var samples;
         if (dsRatio > 1.01) {
@@ -12816,20 +12794,13 @@ async function startJtcatAudio() {
         } else {
           samples = rawSamples;
         }
-        if (_jtcatAudioCallbackCount <= 3 || _jtcatAudioCallbackCount % 100 === 0) {
-          var maxVal = 0;
-          for (var i = 0; i < samples.length; i++) if (Math.abs(samples[i]) > maxVal) maxVal = Math.abs(samples[i]);
-          jtLog('[JTCAT AUDIO] onaudioprocess #' + _jtcatAudioCallbackCount + ' rawLen=' + rawSamples.length + ' dsLen=' + samples.length + ' peak=' + maxVal.toFixed(6));
-        }
-        // Send to main process for FT8 decode
         window.api.jtcatAudio(Array.from(samples));
       } catch (err) {
-        jtLog('[JTCAT AUDIO] processor error: ' + (err.message || err));
+        console.error('[JTCAT] Audio processor error:', err.message || err);
       }
     };
     source.connect(jtcatAudioProcessor);
     jtcatAudioProcessor.connect(jtcatAudioCtx.destination);
-    jtLog('[JTCAT AUDIO] Pipeline connected OK');
 
     // Monitor audio stream — some rigs (e.g. Yaesu FT-710) disconnect USB audio during TX
     var audioTrack = jtcatAudioStream.getAudioTracks()[0];
@@ -12851,7 +12822,6 @@ async function startJtcatAudio() {
     console.log('[JTCAT] Audio capture started, device:', s.remoteAudioInput || 'default', 'sample rate:', jtcatAudioCtx.sampleRate);
   } catch (err) {
     console.error('[JTCAT] Audio capture failed:', err.message || err);
-    try { window.api.jtcatLog('[JTCAT AUDIO] FAILED: ' + (err.message || err)); } catch(e){}
   }
 }
 
@@ -12876,7 +12846,6 @@ function stopJtcatAudio() {
 }
 
 function startJtcatView() {
-  try { window.api.jtcatLog('[JTCAT AUDIO] startJtcatView() — jtcatRunning=' + jtcatRunning + ' jtcatRemoteActive=' + jtcatRemoteActive); } catch(e){}
   if (jtcatRunning) return;
   jtcatRunning = true;
   jtcatDecodes = [];
@@ -12886,8 +12855,6 @@ function startJtcatView() {
   if (!jtcatRemoteActive) {
     window.api.jtcatStart(jtcatModeSelect.value);
     startJtcatAudio();
-  } else {
-    try { window.api.jtcatLog('[JTCAT AUDIO] SKIPPED startJtcatAudio — jtcatRemoteActive is true'); } catch(e){}
   }
   startJtcatCountdown();
 }
@@ -13718,19 +13685,12 @@ function jtcatMapClear() {
 var waterfallCtx = jtcatWaterfall.getContext('2d');
 var waterfallAnimFrame = null;
 
-var _wfLogCount = 0;
 function jtcatWaterfallLoop() {
   if (!jtcatRunning || !jtcatAnalyser) return;
 
   try {
   var freqData = new Uint8Array(jtcatAnalyser.frequencyBinCount);
   jtcatAnalyser.getByteFrequencyData(freqData);
-  if (_wfLogCount < 3) {
-    var maxBin = 0;
-    for (var di = 0; di < freqData.length; di++) if (freqData[di] > maxBin) maxBin = freqData[di];
-    console.log('[JTCAT WF] bins:', freqData.length, 'maxBin:', maxBin, 'ctx.state:', jtcatAudioCtx ? jtcatAudioCtx.state : 'null');
-    _wfLogCount++;
-  }
 
   // AnalyserNode covers 0 to sampleRate/2. FT8 passband is 0–3000 Hz.
   // At native rate (e.g. 48kHz), bins cover 0–24000 Hz, so 3000 Hz = 3000/24000 * 1024 = ~128 bins.

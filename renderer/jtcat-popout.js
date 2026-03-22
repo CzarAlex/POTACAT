@@ -731,12 +731,9 @@
     var bandBtn = document.querySelector('.jtcat-band-btn[data-freq="' + lastFreq + '"]');
     if (!bandBtn) bandBtn = document.querySelector('.jtcat-band-btn[data-band="20m"]');
     if (bandBtn) selectBand(bandBtn, false);
-    console.log('[JTCAT popout] calling jtcatStart, mode:', modeSelect.value);
     window.api.jtcatStart(modeSelect.value);
     // Start audio capture directly in the popout window
     startPopoutAudio(s.remoteAudioInput || '');
-  }).catch(function(err) {
-    console.error('[JTCAT popout] getSettings error:', err);
   });
 
   // --- Audio capture (runs in the popout window, sends samples to main process) ---
@@ -764,7 +761,6 @@
       if (popoutAudioCtx.state === 'suspended') await popoutAudioCtx.resume();
       var nativeRate = popoutAudioCtx.sampleRate;
       var dsRatio = nativeRate / 12000;
-      console.log('[JTCAT popout] AudioContext rate=' + nativeRate + ' ds=' + dsRatio.toFixed(2));
       var source = popoutAudioCtx.createMediaStreamSource(popoutAudioStream);
       var bufSize = dsRatio > 1 ? 4096 * Math.ceil(dsRatio) : 4096;
       bufSize = Math.pow(2, Math.ceil(Math.log2(bufSize)));

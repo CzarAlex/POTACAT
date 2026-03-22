@@ -1891,7 +1891,6 @@ function processPopoutJtcatQso(results) {
 }
 
 function startJtcat(mode) {
-  console.log('[JTCAT ENGINE] startJtcat called, mode:', mode);
   stopJtcat();
   ft8Engine = new Ft8Engine();
   ft8Engine.setMode(mode || 'FT8');
@@ -3478,11 +3477,16 @@ async function startRemoteAudio() {
       contextIsolation: true,
       nodeIntegration: false,
       autoplayPolicy: 'no-user-gesture-required',
+      backgroundThrottling: false,
     },
   });
 
   // Grant media permissions to the audio window's session
   remoteAudioWin.webContents.session.setPermissionRequestHandler((_wc, perm, cb) => cb(true));
+  // Chromium 134+ may mute getUserMedia tracks in never-shown windows.
+  // Briefly show off-screen so the renderer is "visible" during capture, then hide.
+  remoteAudioWin.setPosition(-9999, -9999);
+  remoteAudioWin.showInactive();
 
   remoteAudioWin.loadFile(path.join(__dirname, 'renderer', 'remote-audio.html'));
 
@@ -6655,6 +6659,10 @@ app.whenReady().then(() => {
 
   ipcMain.on('remote-audio-status', (_e, status) => {
     console.log('[Echo CAT Audio]', JSON.stringify(status));
+    // Hide audio window once getUserMedia has captured (was shown briefly for Chromium 134+)
+    if (status.status === 'started' && remoteAudioWin && !remoteAudioWin.isDestroyed()) {
+      remoteAudioWin.hide();
+    }
     // Forward audio connection state to phone
     if (status.connectionState && remoteServer) {
       remoteServer.broadcastRadioStatus({ audioState: status.connectionState });
@@ -7527,10 +7535,7 @@ app.whenReady().then(() => {
   });
 
   // --- JTCAT IPC ---
-  ipcMain.on('jtcat-start', (_e, mode) => {
-    console.log('[JTCAT] jtcat-start IPC received, mode:', mode);
-    startJtcat(mode);
-  });
+  ipcMain.on('jtcat-start', (_e, mode) => startJtcat(mode));
   ipcMain.on('jtcat-stop', () => stopJtcat());
   ipcMain.on('jtcat-set-mode', (_e, mode) => { if (ft8Engine) ft8Engine.setMode(mode); });
   ipcMain.on('jtcat-set-tx-freq', (_e, hz) => { if (ft8Engine) ft8Engine.setTxFreq(hz); });
@@ -7547,15 +7552,8 @@ app.whenReady().then(() => {
   ipcMain.on('jtcat-set-tx-msg', (_e, text) => { if (ft8Engine) ft8Engine.setTxMessage(text); });
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
   ipcMain.on('jtcat-tx-complete', () => { if (ft8Engine) ft8Engine.txComplete(); });
-  ipcMain.on('jtcat-log', (_e, msg) => {
-    console.log(msg);
-  });
-  let _jtcatAudioCount = 0;
+  ipcMain.on('jtcat-log', (_e, msg) => console.log(msg));
   ipcMain.on('jtcat-audio', (_e, buf) => {
-    _jtcatAudioCount++;
-    if (_jtcatAudioCount <= 3 || _jtcatAudioCount % 100 === 0) {
-      console.log('[JTCAT] jtcat-audio IPC #' + _jtcatAudioCount + ' len=' + (buf ? buf.length : 0));
-    }
     if (ft8Engine) ft8Engine.feedAudio(new Float32Array(buf));
   });
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {
