@@ -2049,13 +2049,15 @@ function stopJtcat() {
 function needsSmartSdr() {
   // Connect SmartSDR API if panadapter spots are enabled, CW keyer is active,
   // WSJT-X is active with a Flex, ECHOCAT remote needs rig controls,
-  // or CW XIT offset is configured (XIT is applied via SmartSDR slice commands)
+  // CW XIT offset is configured, or Flex is the active rig (rig panel needs API
+  // for ATU/NB/RF gain/TX power — Kenwood CAT emulation doesn't support these)
   if (settings.smartSdrSpots) return true;
   if (settings.enableCwKeyer) return true;
   if (settings.enableRemote && settings.remoteCwEnabled) return true;
   if (settings.enableWsjtx && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.enableRemote && settings.catTarget && settings.catTarget.type === 'tcp') return true;
   if (settings.cwXit && settings.catTarget && settings.catTarget.type === 'tcp') return true;
+  if (settings.catTarget && settings.catTarget.type === 'tcp') return true;
   return false;
 }
 
@@ -2449,7 +2451,11 @@ function connectRemote() {
       // Models with DTR keying support can override via cw.paddleKey: 'dtr'
       const paddleMethod = cwCaps.paddleKey || 'txrx';
       if (paddleMethod === 'dtr') {
-        cat.setCwKeyDtr(down, cwCaps.dtrPins);
+        // If dedicated CW Key Port handles DTR, skip DTR on main CAT port
+        // (QMX/IC-705 CAT ports don't support DTR on Linux CDC-ACM)
+        if (!(cwKeyPort && cwKeyPort.isOpen)) {
+          cat.setCwKeyDtr(down, cwCaps.dtrPins);
+        }
       } else if (paddleMethod === 'ta' && cwCaps.taKey) {
         cat.setCwKeyTa(down);
       } else {
@@ -2767,6 +2773,14 @@ function connectRemote() {
         } else if (cat && cat.connected) cat.setFilterWidth(width);
         _currentFilterWidth = width;
         broadcastRigState();
+        break;
+      }
+      case 'send-custom-cat': {
+        const cmd = data.command;
+        if (!cmd || typeof cmd !== 'string') break;
+        console.log('[Echo CAT] Custom CAT command:', cmd);
+        if (flexSdr()) smartSdr._send(cmd);
+        else if (cat && cat.connected) cat.sendRaw(cmd);
         break;
       }
     }
@@ -6638,6 +6652,17 @@ app.whenReady().then(() => {
       }
       case 'get-state': {
         broadcastRigState();
+        break;
+      }
+      case 'send-custom-cat': {
+        const cmd = data.command;
+        if (!cmd || typeof cmd !== 'string') break;
+        console.log('[Rig] Custom CAT command:', cmd);
+        if (flexSdr()) {
+          smartSdr._send(cmd);
+        } else if (cat && cat.connected) {
+          cat.sendRaw(cmd);
+        }
         break;
       }
     }
