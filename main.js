@@ -7150,8 +7150,8 @@ app.whenReady().then(() => {
       }
     }
 
-    // Push rotor state to ECHOCAT phone when quick-toggled from desktop
-    if (has('rotorActive') || has('enableRotor')) {
+    // Push updated settings to ECHOCAT phone
+    if (has('rotorActive') || has('enableRotor') || has('customCatButtons')) {
       updateRemoteSettings();
     }
 
