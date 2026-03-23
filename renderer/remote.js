@@ -820,6 +820,13 @@
       case 'jtcat-spectrum':
         ft8RenderWaterfall(msg.bins);
         break;
+
+      case 'jtcat-auto-cq-state':
+        if (ft8AutoCqSelect) {
+          ft8AutoCqSelect.value = msg.mode || 'off';
+          ft8AutoCqSelect.style.borderColor = msg.mode !== 'off' ? 'var(--pota)' : '';
+        }
+        break;
     }
   }
 
@@ -3806,6 +3813,17 @@
       ft8TxEnabled = true;
       ft8TxBtn.classList.add('active');
       ft8Send({ type: 'jtcat-call-cq' });
+    }
+  });
+
+  // Auto-CQ response
+  const ft8AutoCqSelect = document.getElementById('ft8-auto-cq');
+  ft8AutoCqSelect.addEventListener('change', () => {
+    ft8Send({ type: 'jtcat-auto-cq-mode', mode: ft8AutoCqSelect.value });
+    if (ft8AutoCqSelect.value !== 'off') {
+      ft8TxEnabled = true;
+      ft8TxBtn.classList.add('active');
+      ft8Send({ type: 'jtcat-enable-tx', enabled: true });
     }
   });
 

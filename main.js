@@ -1713,6 +1713,38 @@ let jtcatQuietFreq = 1500; // auto-detected quiet TX frequency from FFT analysis
 const JTCAT_MAX_CQ_RETRIES = 15;
 const JTCAT_MAX_QSO_RETRIES = 6;
 
+// Auto-CQ response state
+let jtcatAutoCqMode = 'off';          // 'off' | 'pota' | 'sota' | 'all'
+let jtcatAutoCqWorkedSession = new Set(); // callsigns attempted/worked this session
+let jtcatAutoCqOwner = null;           // 'popout' | 'remote' | null
+
+function matchesAutoCqFilter(text, filterMode) {
+  const upper = (text || '').toUpperCase();
+  if (!upper.startsWith('CQ ')) return false;
+  if (filterMode === 'all') return true;
+  if (filterMode === 'pota') return upper.startsWith('CQ POTA ');
+  if (filterMode === 'sota') return upper.startsWith('CQ SOTA ');
+  return false;
+}
+
+function parseCqMessage(text) {
+  const parts = (text || '').toUpperCase().split(/\s+/);
+  // CQ [MODIFIER] CALLSIGN GRID — modifier is optional (POTA, SOTA, DX, etc.)
+  let callIdx = 1;
+  if (parts.length > 3 && parts[1].length <= 5 && !/[0-9]/.test(parts[1])) callIdx = 2;
+  return { call: parts[callIdx] || '', grid: parts[callIdx + 1] || '' };
+}
+
+function broadcastAutoCqState() {
+  const state = { mode: jtcatAutoCqMode, workedCount: jtcatAutoCqWorkedSession.size };
+  if (jtcatPopoutWin && !jtcatPopoutWin.isDestroyed()) {
+    jtcatPopoutWin.webContents.send('jtcat-auto-cq-state', state);
+  }
+  if (remoteServer && remoteServer.hasClient()) {
+    remoteServer.broadcastJtcatAutoCqState(state);
+  }
+}
+
 function remoteJtcatMyCall() { return (settings.myCallsign || '').toUpperCase(); }
 function remoteJtcatMyGrid() { return (settings.grid || '').toUpperCase().substring(0, 4); }
 
@@ -1915,6 +1947,9 @@ function processPopoutJtcatQso(results) {
 
 function startJtcat(mode) {
   stopJtcat();
+  jtcatAutoCqMode = 'off';
+  jtcatAutoCqWorkedSession.clear();
+  jtcatAutoCqOwner = null;
   ft8Engine = new Ft8Engine();
   ft8Engine.setMode(mode || 'FT8');
 
@@ -1935,6 +1970,15 @@ function startJtcat(mode) {
                       String(now.getUTCMinutes()).padStart(2, '0') + ':' +
                       String(now.getUTCSeconds()).padStart(2, '0');
       remoteServer.broadcastJtcatDecode({ ...data, time: timeStr });
+    }
+    // Clean up completed QSOs (re-arms auto-CQ for next cycle)
+    if (remoteJtcatQso && remoteJtcatQso.phase === 'done') {
+      remoteJtcatQso = null;
+      remoteJtcatBroadcastQso();
+    }
+    if (popoutJtcatQso && popoutJtcatQso.phase === 'done') {
+      popoutJtcatQso = null;
+      popoutBroadcastQso();
     }
     if (remoteJtcatQso && remoteJtcatQso.phase !== 'done') {
       const phaseBefore = remoteJtcatQso.phase;
@@ -1990,6 +2034,65 @@ function startJtcat(mode) {
         }
       } else if (popoutJtcatQso && popoutJtcatQso.phase !== phaseBefore) {
         popoutJtcatQso.txRetries = 0;
+      }
+    }
+
+    // --- Auto-CQ Response ---
+    // Only trigger when no active QSO is running and auto mode is enabled
+    if (jtcatAutoCqMode !== 'off' && !popoutJtcatQso && !remoteJtcatQso) {
+      const myCall = (settings.myCallsign || '').toUpperCase();
+      const myGrid = (settings.grid || '').toUpperCase().substring(0, 4);
+      if (myCall && myGrid && ft8Engine) {
+        const results = data.results || [];
+        const candidates = results
+          .filter(d => matchesAutoCqFilter(d.text, jtcatAutoCqMode))
+          .map(d => ({ ...d, ...parseCqMessage(d.text) }))
+          .filter(d => {
+            if (!d.call || d.call === myCall) return false;
+            if (jtcatAutoCqWorkedSession.has(d.call)) return false;
+            if (workedQsos && workedQsos.has(d.call)) return false;
+            return true;
+          });
+
+        // Pick strongest SNR
+        candidates.sort((a, b) => b.db - a.db);
+        const best = candidates[0];
+
+        if (best) {
+          jtcatAutoCqWorkedSession.add(best.call);
+          console.log(`[JTCAT Auto-CQ] Responding to ${best.call} (${best.grid}) SNR ${best.db}dB`);
+
+          // Create QSO — assign to the owner's state variable
+          const qso = {
+            mode: 'reply',
+            phase: 'reply',
+            call: best.call,
+            grid: best.grid,
+            myCall,
+            myGrid,
+            txMsg: best.call + ' ' + myCall + ' ' + myGrid,
+            report: null,
+            sentReport: null,
+            txRetries: 0,
+          };
+
+          ft8Engine.setRxFreq(best.df);
+          ft8Engine.setTxFreq(best.df);
+          ft8Engine._txEnabled = true;
+          // Match their TX slot: they CQ on slot X, we reply on the opposite
+          const theirSlot = best.slot || 'even';
+          ft8Engine.setTxSlot(theirSlot === 'even' ? 'odd' : 'even');
+
+          if (jtcatAutoCqOwner === 'remote') {
+            remoteJtcatQso = qso;
+            remoteJtcatSetTxMsg(qso.txMsg);
+          } else {
+            popoutJtcatQso = qso;
+            if (ft8Engine) ft8Engine.setTxMessage(qso.txMsg);
+            popoutBroadcastQso();
+          }
+          broadcastAutoCqState();
+        }
       }
     }
   });
@@ -3287,6 +3390,14 @@ function connectRemote() {
 
   remoteServer.on('jtcat-enable-tx', ({ enabled }) => {
     if (ft8Engine) ft8Engine._txEnabled = enabled;
+  });
+
+  remoteServer.on('jtcat-auto-cq-mode', ({ mode }) => {
+    jtcatAutoCqMode = mode || 'off';
+    jtcatAutoCqOwner = 'remote';
+    if (mode === 'off') jtcatAutoCqWorkedSession.clear();
+    broadcastAutoCqState();
+    console.log('[JTCAT Remote] Auto-CQ mode:', mode);
   });
 
   remoteServer.on('jtcat-halt-tx', () => {
@@ -6494,6 +6605,14 @@ app.whenReady().then(() => {
     console.log('[JTCAT Popout] CQ:', txMsg, 'slot:', nextSlot, 'immediate:', fired);
   });
 
+  ipcMain.on('jtcat-popout-auto-cq-mode', (_e, mode) => {
+    jtcatAutoCqMode = mode || 'off';
+    jtcatAutoCqOwner = 'popout';
+    if (mode === 'off') jtcatAutoCqWorkedSession.clear();
+    broadcastAutoCqState();
+    console.log('[JTCAT Popout] Auto-CQ mode:', mode);
+  });
+
   ipcMain.on('jtcat-popout-cancel-qso', () => {
     popoutJtcatQso = null;
     if (ft8Engine) {
@@ -7651,6 +7770,13 @@ app.whenReady().then(() => {
   });
   ipcMain.on('jtcat-set-tx-msg', (_e, text) => { if (ft8Engine) ft8Engine.setTxMessage(text); });
   ipcMain.on('jtcat-set-tx-slot', (_e, slot) => { if (ft8Engine) ft8Engine.setTxSlot(slot); });
+  ipcMain.on('jtcat-auto-cq-mode', (_e, mode) => {
+    jtcatAutoCqMode = mode || 'off';
+    jtcatAutoCqOwner = 'popout';
+    if (mode === 'off') jtcatAutoCqWorkedSession.clear();
+    broadcastAutoCqState();
+    console.log('[JTCAT] Auto-CQ mode:', mode);
+  });
   ipcMain.on('jtcat-tx-complete', () => { if (ft8Engine) ft8Engine.txComplete(); });
   ipcMain.on('jtcat-log', (_e, msg) => console.log(msg));
   ipcMain.on('jtcat-audio', (_e, buf) => {

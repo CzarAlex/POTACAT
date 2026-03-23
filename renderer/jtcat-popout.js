@@ -697,6 +697,22 @@
     window.api.jtcatCancelQso();
   });
 
+  // Auto-CQ response
+  var autoCqSelect = document.getElementById('jp-auto-cq');
+  autoCqSelect.addEventListener('change', function() {
+    window.api.jtcatSetAutoCqMode(autoCqSelect.value);
+    if (autoCqSelect.value !== 'off') {
+      txEnabled = true;
+      enableTxBtn.classList.add('active');
+      enableTxBtn.textContent = 'TX On';
+      window.api.jtcatEnableTx(true);
+    }
+  });
+  window.api.onJtcatAutoCqState(function(state) {
+    autoCqSelect.value = state.mode || 'off';
+    autoCqSelect.style.borderColor = state.mode !== 'off' ? 'var(--pota)' : '';
+  });
+
   // Band buttons
   function selectBand(btn, save) {
     var freq = parseFloat(btn.dataset.freq);
