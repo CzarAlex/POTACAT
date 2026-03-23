@@ -2636,35 +2636,40 @@ const launcherConfig = document.getElementById('launcher-config');
 const launcherUrlDisplay = document.getElementById('launcher-url-display');
 const launcherStatus = document.getElementById('launcher-status');
 
-setEnableLauncher.addEventListener('change', async () => {
-  launcherConfig.classList.toggle('hidden', !setEnableLauncher.checked);
-  if (setEnableLauncher.checked) {
-    launcherStatus.textContent = 'Installing...';
-    const result = await window.api.installLauncher();
-    if (result.ok) {
-      launcherStatus.textContent = 'Installed. Will auto-start at next login.';
-      launcherStatus.style.color = '#4ecca3';
+if (setEnableLauncher) {
+  setEnableLauncher.addEventListener('change', async () => {
+    if (launcherConfig) launcherConfig.classList.toggle('hidden', !setEnableLauncher.checked);
+    if (setEnableLauncher.checked) {
+      if (launcherStatus) launcherStatus.textContent = 'Installing...';
+      const result = await window.api.installLauncher();
+      if (launcherStatus) {
+        if (result.ok) {
+          launcherStatus.textContent = 'Installed. Will auto-start at next login.';
+          launcherStatus.style.color = '#4ecca3';
+        } else {
+          launcherStatus.textContent = 'Install failed: ' + (result.error || 'unknown');
+          launcherStatus.style.color = '#e94560';
+        }
+      }
+      // Show URL
+      try {
+        const ips = await window.api.getLocalIPs();
+        const tsIp = ips.find(ip => ip.tailscale);
+        const lanIp = ips.find(ip => !ip.tailscale);
+        const ip = tsIp || lanIp;
+        if (launcherUrlDisplay) launcherUrlDisplay.textContent = ip ? 'https://' + ip.address + ':7301/' : 'https://YOUR_IP:7301/';
+      } catch { if (launcherUrlDisplay) launcherUrlDisplay.textContent = 'https://YOUR_IP:7301/'; }
     } else {
-      launcherStatus.textContent = 'Install failed: ' + (result.error || 'unknown');
-      launcherStatus.style.color = '#e94560';
+      if (launcherStatus) launcherStatus.textContent = 'Removing...';
+      const result = await window.api.uninstallLauncher();
+      if (launcherStatus) {
+        launcherStatus.textContent = result.ok ? 'Removed.' : 'Error: ' + (result.error || 'unknown');
+        launcherStatus.style.color = result.ok ? '#aaa' : '#e94560';
+      }
+      if (launcherUrlDisplay) launcherUrlDisplay.textContent = '';
     }
-    // Show URL
-    try {
-      const ips = await window.api.getLocalIPs();
-      const tsIp = ips.find(ip => ip.tailscale);
-      const lanIp = ips.find(ip => !ip.tailscale);
-      const ip = tsIp || lanIp;
-      if (ip) launcherUrlDisplay.textContent = 'https://' + ip.address + ':7301/';
-      else launcherUrlDisplay.textContent = 'https://YOUR_IP:7301/';
-    } catch { launcherUrlDisplay.textContent = 'https://YOUR_IP:7301/'; }
-  } else {
-    launcherStatus.textContent = 'Removing...';
-    const result = await window.api.uninstallLauncher();
-    launcherStatus.textContent = result.ok ? 'Removed.' : 'Error: ' + (result.error || 'unknown');
-    launcherStatus.style.color = result.ok ? '#aaa' : '#e94560';
-    launcherUrlDisplay.textContent = '';
-  }
-});
+  });
+}
 
 remoteRegenToken.addEventListener('click', () => {
   const arr = new Uint8Array(3);
@@ -6830,18 +6835,19 @@ async function openSettingsDialog(tab) {
   }
   updateRemoteAudioSummary(s.remoteAudioInput, s.remoteAudioOutput);
   // Remote Launcher
-  setEnableLauncher.checked = s.enableLauncher === true;
-  launcherConfig.classList.toggle('hidden', !s.enableLauncher);
-  if (s.enableLauncher) {
-    try {
-      const ips = await window.api.getLocalIPs();
-      const tsIp = ips.find(ip => ip.tailscale);
-      const lanIp = ips.find(ip => !ip.tailscale);
-      const ip = tsIp || lanIp;
-      if (ip) launcherUrlDisplay.textContent = 'https://' + ip.address + ':7301/';
-    } catch {}
-    launcherStatus.textContent = 'Installed';
-    launcherStatus.style.color = '#4ecca3';
+  if (setEnableLauncher) {
+    setEnableLauncher.checked = s.enableLauncher === true;
+    if (launcherConfig) launcherConfig.classList.toggle('hidden', !s.enableLauncher);
+    if (s.enableLauncher) {
+      try {
+        const ips = await window.api.getLocalIPs();
+        const tsIp = ips.find(ip => ip.tailscale);
+        const lanIp = ips.find(ip => !ip.tailscale);
+        const ip = tsIp || lanIp;
+        if (ip && launcherUrlDisplay) launcherUrlDisplay.textContent = 'https://' + ip.address + ':7301/';
+      } catch {}
+      if (launcherStatus) { launcherStatus.textContent = 'Installed'; launcherStatus.style.color = '#4ecca3'; }
+    }
   }
   // Club Station Mode
   setClubMode.checked = s.clubMode === true;
@@ -6990,7 +6996,7 @@ settingsSave.addEventListener('click', async () => {
   const remotePttTimeoutVal = parseInt(setRemotePttTimeout.value, 10) || 180;
   const remoteCwEnabledVal = setRemoteCwEnabled.checked;
   const cwKeyPortVal = setCwKeyPort.value || '';
-  const launcherEnabled = setEnableLauncher.checked;
+  const launcherEnabled = setEnableLauncher ? setEnableLauncher.checked : false;
   const clubModeEnabled = setClubMode.checked;
   const clubCsvPathVal = setClubCsvPath.value || '';
   // Audio comes from the active rig (resolved after selectedRig below)
