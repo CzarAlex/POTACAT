@@ -2003,6 +2003,29 @@ async function saveBannerQso() {
       updateBlModeFromRadio();
       updateBlClock();
       blCallsign.focus();
+      // If in activator mode, add to activation log so it shows immediately
+      if (appMode === 'activator' && activationActive && activatorParkRefs.length > 0) {
+        const contact = {
+          callsign,
+          frequency: String(freqKhz),
+          mode,
+          rstSent,
+          rstRcvd,
+          timestamp: new Date().toISOString(),
+          source: 'banner-log',
+        };
+        activatorContacts.push(contact);
+        renderActivatorLog();
+        updateActivatorCounter();
+        window.api.qrzLookup(callsign).then(info => {
+          if (info) {
+            contact.name = qrzDisplayName(info);
+            if (info.grid) contact.grid = info.grid;
+            if (info.state) contact.state = info.state;
+            renderActivatorLog();
+          }
+        }).catch(() => {});
+      }
     } else {
       console.error('[BannerLogger] Save failed:', result);
     }
@@ -6057,6 +6080,32 @@ logSaveBtn.addEventListener('click', async () => {
     const displayCalls = callsigns.join(', ');
     if (lastResult && lastResult.success) {
       logDialog.close();
+      // If in activator mode, add to activation log so it shows immediately
+      if (appMode === 'activator' && activationActive && activatorParkRefs.length > 0) {
+        for (const cs of callsigns) {
+          const contact = {
+            callsign: cs,
+            frequency: frequency,
+            mode,
+            rstSent: getRstDigits('rst-sent-digits', '59'),
+            rstRcvd: getRstDigits('rst-rcvd-digits', '59'),
+            timestamp: new Date().toISOString(),
+            source: 'spot-log',
+          };
+          activatorContacts.push(contact);
+          // Fire-and-forget QRZ lookup
+          window.api.qrzLookup(cs).then(info => {
+            if (info) {
+              contact.name = qrzDisplayName(info);
+              if (info.grid) contact.grid = info.grid;
+              if (info.state) contact.state = info.state;
+              renderActivatorLog();
+            }
+          }).catch(() => {});
+        }
+        renderActivatorLog();
+        updateActivatorCounter();
+      }
       // Advance selection to the next spot by frequency so the highlight
       // doesn't disappear when "hide worked" removes the logged station
       if (lastTunedSpot && hideWorked) {
