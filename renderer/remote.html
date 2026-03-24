@@ -205,6 +205,52 @@
             <button type="button" class="so-step-btn" id="so-maxage-up">+</button>
           </div>
         </div>
+        <!-- Tuning settings (synced with POTACAT desktop) -->
+        <div class="so-section-label">Tuning</div>
+        <div class="so-row">
+          <label class="so-label">CW XIT (Hz)</label>
+          <div class="so-stepper">
+            <button type="button" class="so-step-btn" id="so-xit-dn">&minus;</button>
+            <span id="so-xit-val" class="so-step-val">0</span>
+            <button type="button" class="so-step-btn" id="so-xit-up">+</button>
+          </div>
+        </div>
+        <div class="so-row">
+          <label class="so-label">CW Filter (Hz)</label>
+          <div class="so-stepper">
+            <button type="button" class="so-step-btn" id="so-cwfilt-dn">&minus;</button>
+            <span id="so-cwfilt-val" class="so-step-val">0</span>
+            <button type="button" class="so-step-btn" id="so-cwfilt-up">+</button>
+          </div>
+        </div>
+        <div class="so-row">
+          <label class="so-label">SSB Filter (Hz)</label>
+          <div class="so-stepper">
+            <button type="button" class="so-step-btn" id="so-ssbfilt-dn">&minus;</button>
+            <span id="so-ssbfilt-val" class="so-step-val">0</span>
+            <button type="button" class="so-step-btn" id="so-ssbfilt-up">+</button>
+          </div>
+        </div>
+        <div class="so-row">
+          <label class="so-label">Digi Filter (Hz)</label>
+          <div class="so-stepper">
+            <button type="button" class="so-step-btn" id="so-digfilt-dn">&minus;</button>
+            <span id="so-digfilt-val" class="so-step-val">0</span>
+            <button type="button" class="so-step-btn" id="so-digfilt-up">+</button>
+          </div>
+        </div>
+        <div class="so-row so-toggles">
+          <div class="so-toggle-group">
+            <button type="button" class="rc-btn rc-toggle" id="so-split-btn">Split</button>
+          </div>
+          <div class="so-toggle-group">
+            <button type="button" class="rc-btn rc-toggle" id="so-atu-auto-btn">ATU Auto</button>
+          </div>
+          <div class="so-toggle-group">
+            <button type="button" class="rc-btn rc-toggle" id="so-tune-click-btn">Tune Click</button>
+          </div>
+        </div>
+
         <div class="so-section-label">Display</div>
         <div class="so-row">
           <label class="so-label">Distance</label>
@@ -235,7 +281,40 @@
             <select class="so-select" id="so-paddle-type">
               <option value="tinymidi">TinyMIDI — keyboard mode ([ ])</option>
               <option value="vail">Vail / VBand (Ctrl)</option>
+              <option value="midi">TinyMIDI — USB MIDI</option>
             </select>
+          </div>
+        </div>
+        <div id="so-midi-config" class="hidden">
+          <div class="so-row">
+            <label class="so-label">MIDI Device</label>
+            <div class="so-controls" style="flex:1;min-width:0;">
+              <select class="so-select" id="so-midi-device" style="flex:1;">
+                <option value="">— No MIDI devices —</option>
+              </select>
+              <button type="button" class="rc-btn" id="midi-refresh-btn"
+                      style="font-size:12px;padding:4px 8px;">Refresh</button>
+            </div>
+          </div>
+          <div class="so-row">
+            <label class="so-label">Dit Note</label>
+            <div class="so-controls">
+              <span id="midi-dit-note-display" style="font-family:monospace;min-width:24px;">--</span>
+              <button type="button" class="rc-btn" id="midi-learn-dit"
+                      style="font-size:12px;padding:4px 8px;">Learn</button>
+            </div>
+          </div>
+          <div class="so-row">
+            <label class="so-label">Dah Note</label>
+            <div class="so-controls">
+              <span id="midi-dah-note-display" style="font-family:monospace;min-width:24px;">--</span>
+              <button type="button" class="rc-btn" id="midi-learn-dah"
+                      style="font-size:12px;padding:4px 8px;">Learn</button>
+            </div>
+          </div>
+          <div class="so-row">
+            <label class="so-label">Status</label>
+            <span id="midi-status" style="font-size:13px;color:var(--text-dim);">Not connected</span>
           </div>
         </div>
         <div id="so-cw-macros" class="so-cw-macros hidden">

@@ -345,7 +345,7 @@
       if (call) {
         jpTxFreqHz = d.df || 1500;
         txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
-        if (typeof updateTxMarker === 'function') updateTxMarker();
+
         console.log('[JTCAT popout] Reply to CQ:', call, grid, 'df:', d.df, 'slot:', d.slot);
         // Add the CQ message to My Activity as the start of the QSO thread
         addToMyActivity(d);
@@ -360,7 +360,7 @@
         var hasRR73 = payload === 'RR73' || payload === 'RRR' || payload === '73';
         jpTxFreqHz = d.df || 1500;
         txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
-        if (typeof updateTxMarker === 'function') updateTxMarker();
+
         console.log('[JTCAT popout] Pick up QSO with', fromCall, 'payload:', payload, 'df:', d.df);
         window.api.jtcatReply({
           call: fromCall, grid: grid, df: d.df || 1500, slot: d.slot,
@@ -373,7 +373,7 @@
         jpTxFreqHz = d.df || 1500;
         txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
         window.api.jtcatSetTxFreq(jpTxFreqHz);
-        if (typeof updateTxMarker === 'function') updateTxMarker();
+
       }
     }
   }
@@ -756,6 +756,10 @@
   var popoutAudioCtx = null;
   var popoutAudioStream = null;
   var popoutAudioProcessor = null;
+  var popoutAnalyser = null;
+  var popoutWaterfallAnim = null;
+  var popoutQuietFreqFrame = 0;
+  var popoutSpectrumFrame = 0;
 
   async function startPopoutAudio(deviceId) {
     try {
@@ -778,25 +782,86 @@
       var nativeRate = popoutAudioCtx.sampleRate;
       var dsRatio = nativeRate / 12000;
       var source = popoutAudioCtx.createMediaStreamSource(popoutAudioStream);
-      var bufSize = dsRatio > 1 ? 4096 * Math.ceil(dsRatio) : 4096;
-      bufSize = Math.pow(2, Math.ceil(Math.log2(bufSize)));
-      if (bufSize > 16384) bufSize = 16384;
-      popoutAudioProcessor = popoutAudioCtx.createScriptProcessor(bufSize, 1, 1);
-      popoutAudioProcessor.onaudioprocess = function(e) {
-        var raw = e.inputBuffer.getChannelData(0);
-        var samples;
+
+      // AnalyserNode for waterfall FFT (driven locally, no IPC needed)
+      popoutAnalyser = popoutAudioCtx.createAnalyser();
+      popoutAnalyser.fftSize = 2048;
+      popoutAnalyser.smoothingTimeConstant = 0.3;
+      source.connect(popoutAnalyser);
+
+      console.log('[JTCAT popout] AudioContext sample rate:', nativeRate, 'dsRatio:', dsRatio.toFixed(2));
+
+      // Try AudioWorklet first (proper anti-alias FIR filter), fall back to ScriptProcessorNode
+      try {
+        await popoutAudioCtx.audioWorklet.addModule('jtcat-audio-worklet.js');
+        var workletNode = new AudioWorkletNode(popoutAudioCtx, 'jtcat-processor', {
+          processorOptions: { dsRatio: dsRatio },
+        });
+        workletNode.port.onmessage = function(e) {
+          window.api.jtcatAudio(e.data);
+        };
+        source.connect(workletNode);
+        workletNode.connect(popoutAudioCtx.destination);
+        popoutAudioProcessor = workletNode;
+        console.log('[JTCAT popout] Using AudioWorkletNode for audio capture');
+      } catch (workletErr) {
+        console.warn('[JTCAT popout] AudioWorklet failed:', workletErr.message, '— falling back to ScriptProcessorNode');
+        var bufSize = dsRatio > 1 ? 4096 * Math.ceil(dsRatio) : 4096;
+        bufSize = Math.pow(2, Math.ceil(Math.log2(bufSize)));
+        if (bufSize > 16384) bufSize = 16384;
+        popoutAudioProcessor = popoutAudioCtx.createScriptProcessor(bufSize, 1, 1);
+        // Build anti-alias FIR filter for proper downsampling
+        var firCoeffs = null, firHistory = null, firIdx = 0, decCounter = 0;
         if (dsRatio > 1.01) {
-          var outLen = Math.floor(raw.length / dsRatio);
-          samples = new Float32Array(outLen);
-          for (var i = 0; i < outLen; i++) samples[i] = raw[Math.round(i * dsRatio)];
-        } else {
-          samples = raw;
+          var cutoff = 0.45 / dsRatio;
+          var taps = Math.max(31, Math.round(dsRatio * 16) | 1);
+          firCoeffs = new Float32Array(taps);
+          firHistory = new Float32Array(taps);
+          var mid = (taps - 1) / 2, fsum = 0;
+          for (var t = 0; t < taps; t++) {
+            var n = t - mid;
+            var h = Math.abs(n) < 1e-6 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * n) / (Math.PI * n);
+            var w = 0.42 - 0.5 * Math.cos(2 * Math.PI * t / (taps - 1)) + 0.08 * Math.cos(4 * Math.PI * t / (taps - 1));
+            firCoeffs[t] = h * w; fsum += firCoeffs[t];
+          }
+          for (var t = 0; t < taps; t++) firCoeffs[t] /= fsum;
         }
-        window.api.jtcatAudio(Array.from(samples));
-      };
-      source.connect(popoutAudioProcessor);
-      popoutAudioProcessor.connect(popoutAudioCtx.destination);
-      console.log('[JTCAT popout] Audio capture started');
+        popoutAudioProcessor.onaudioprocess = function(e) {
+          try {
+            var rawSamples = e.inputBuffer.getChannelData(0);
+            var samples;
+            if (dsRatio > 1.01) {
+              var out = [];
+              var ratio = Math.round(dsRatio);
+              for (var i = 0; i < rawSamples.length; i++) {
+                firHistory[firIdx] = rawSamples[i];
+                firIdx = (firIdx + 1) % firCoeffs.length;
+                decCounter++;
+                if (decCounter >= ratio) {
+                  decCounter = 0;
+                  var sum = 0, idx = firIdx;
+                  for (var t = 0; t < firCoeffs.length; t++) {
+                    sum += firHistory[idx] * firCoeffs[t];
+                    idx = (idx + 1) % firCoeffs.length;
+                  }
+                  out.push(sum);
+                }
+              }
+              samples = out;
+            } else {
+              samples = Array.from(rawSamples);
+            }
+            window.api.jtcatAudio(samples);
+          } catch (err) {
+            console.error('[JTCAT popout] Audio processor error:', err.message || err);
+          }
+        };
+        source.connect(popoutAudioProcessor);
+        popoutAudioProcessor.connect(popoutAudioCtx.destination);
+      }
+      console.log('[JTCAT popout] Audio capture started, sample rate:', nativeRate);
+      // Start local waterfall rendering loop
+      popoutWaterfallLoop();
     } catch (err) {
       console.error('[JTCAT popout] Audio capture failed:', err.message);
     }
@@ -842,40 +907,87 @@
   resizeWaterfall();
   window.addEventListener('resize', resizeWaterfall);
 
-  window.api.onJtcatSpectrum(function(data) {
-    var bins = data.bins;
-    if (!bins || !bins.length) return;
-    var w = jpWaterfall.width;
-    var h = jpWaterfall.height;
-    // Scroll existing image down by 1 pixel
-    var imgData = jpWfCtx.getImageData(0, 0, w, h - 1);
-    jpWfCtx.putImageData(imgData, 0, 1);
-    // Draw new row at top
-    var lineData = jpWfCtx.createImageData(w, 1);
-    var step = bins.length / w;
-    for (var x = 0; x < w; x++) {
-      var val = bins[Math.floor(x * step)] || 0;
-      var norm = val / 255;
-      var r, g, b;
-      if (norm < 0.2) { r = 0; g = 0; b = Math.floor(norm * 5 * 140); }
-      else if (norm < 0.4) { var t = (norm - 0.2) * 5; r = 0; g = Math.floor(t * 255); b = 140 + Math.floor(t * 115); }
-      else if (norm < 0.6) { var t = (norm - 0.4) * 5; r = Math.floor(t * 255); g = 255; b = Math.floor((1 - t) * 255); }
-      else if (norm < 0.8) { var t = (norm - 0.6) * 5; r = 255; g = Math.floor((1 - t) * 255); b = 0; }
-      else { var t = (norm - 0.8) * 5; r = 255; g = Math.floor(t * 255); b = Math.floor(t * 255); }
-      var i = x * 4;
-      lineData.data[i] = r; lineData.data[i + 1] = g; lineData.data[i + 2] = b; lineData.data[i + 3] = 255;
-    }
-    jpWfCtx.putImageData(lineData, 0, 0);
-  });
+  // Waterfall rendering loop — driven by local AnalyserNode (no IPC)
+  function popoutWaterfallLoop() {
+    if (!popoutAnalyser) return;
+    try {
+      var freqData = new Uint8Array(popoutAnalyser.frequencyBinCount);
+      popoutAnalyser.getByteFrequencyData(freqData);
 
-  // TX frequency marker overlay (CSS-positioned, doesn't scroll with waterfall)
-  var txMarkerEl = document.getElementById('jp-wf-tx-marker');
-  function updateTxMarker() {
-    var rect = jpWaterfall.getBoundingClientRect();
-    var pct = jpTxFreqHz / 3000 * 100;
-    txMarkerEl.style.left = pct + '%';
+      // AnalyserNode covers 0 to sampleRate/2. FT8 passband is 0–3000 Hz.
+      var nyquist = (popoutAudioCtx ? popoutAudioCtx.sampleRate : 12000) / 2;
+      var passbandBins = Math.floor(3000 / nyquist * freqData.length);
+
+      var w = jpWaterfall.width;
+      var h = jpWaterfall.height;
+
+      // Scroll existing image down by 1 pixel
+      var imgData = jpWfCtx.getImageData(0, 0, w, h - 1);
+      jpWfCtx.putImageData(imgData, 0, 1);
+
+      // Draw new line at top row
+      var lineData = jpWfCtx.createImageData(w, 1);
+      for (var x = 0; x < w; x++) {
+        var binIdx = Math.floor(x * passbandBins / w);
+        var val = freqData[binIdx];
+        var norm = val / 255;
+        var r, g, b;
+        if (norm < 0.2) { r = 0; g = 0; b = Math.floor(norm * 5 * 140); }
+        else if (norm < 0.4) { var t = (norm - 0.2) * 5; r = 0; g = Math.floor(t * 255); b = 140 + Math.floor(t * 115); }
+        else if (norm < 0.6) { var t = (norm - 0.4) * 5; r = Math.floor(t * 255); g = 255; b = Math.floor((1 - t) * 255); }
+        else if (norm < 0.8) { var t = (norm - 0.6) * 5; r = 255; g = Math.floor((1 - t) * 255); b = 0; }
+        else { var t = (norm - 0.8) * 5; r = 255; g = Math.floor(t * 255); b = Math.floor(t * 255); }
+        var i = x * 4;
+        lineData.data[i] = r; lineData.data[i + 1] = g; lineData.data[i + 2] = b; lineData.data[i + 3] = 255;
+      }
+      jpWfCtx.putImageData(lineData, 0, 0);
+
+      // TX marker
+      var txX = Math.round(jpTxFreqHz / 3000 * w);
+      jpWfCtx.fillStyle = '#000';
+      jpWfCtx.fillRect(txX - 2, 0, 5, h);
+      jpWfCtx.fillStyle = '#ff2222';
+      jpWfCtx.fillRect(txX - 1, 0, 3, h);
+
+      // Auto-detect quietest TX frequency (~every 0.5s)
+      popoutQuietFreqFrame++;
+      if (popoutQuietFreqFrame % 30 === 0) {
+        var binHz = nyquist / freqData.length;
+        var windowBins = Math.round(50 / binHz);
+        var startBin = Math.round(200 / binHz);
+        var endBin = Math.round(2800 / binHz);
+        var bestEnergy = Infinity;
+        var bestBin = Math.round(1500 / binHz);
+        for (var b = startBin; b <= endBin - windowBins; b++) {
+          var energy = 0;
+          for (var j = 0; j < windowBins; j++) energy += freqData[b + j];
+          if (energy < bestEnergy) {
+            bestEnergy = energy;
+            bestBin = b + Math.floor(windowBins / 2);
+          }
+        }
+        var quietHz = Math.round(bestBin * binHz / 10) * 10;
+        window.api.jtcatQuietFreq(Math.max(200, Math.min(2800, quietHz)));
+      }
+
+      // Send spectrum to main process for remote/ECHOCAT (~10fps)
+      popoutSpectrumFrame++;
+      if (popoutSpectrumFrame % 6 === 0) {
+        var specBins = new Array(w);
+        for (var sx = 0; sx < w; sx++) {
+          specBins[sx] = freqData[Math.floor(sx * passbandBins / w)];
+        }
+        window.api.jtcatSpectrum(specBins);
+      }
+    } catch (err) {
+      console.error('[JTCAT popout] Waterfall error:', err.message || err);
+    }
+    popoutWaterfallAnim = requestAnimationFrame(popoutWaterfallLoop);
   }
-  updateTxMarker();
+
+  // TX marker is now drawn on the canvas by popoutWaterfallLoop — hide CSS overlay
+  var txMarkerEl = document.getElementById('jp-wf-tx-marker');
+  if (txMarkerEl) txMarkerEl.style.display = 'none';
 
   // Click TX freq label to manually enter frequency
   txFreqLabel.addEventListener('click', function() {
@@ -892,7 +1004,6 @@
         jpTxFreqHz = hz;
         window.api.jtcatSetTxFreq(hz);
         window.api.jtcatSetRxFreq(hz);
-        updateTxMarker();
       }
       txFreqLabel.textContent = 'TX: ' + jpTxFreqHz + ' Hz';
     }
@@ -908,7 +1019,6 @@
     txFreqLabel.textContent = 'TX: ' + hz + ' Hz';
     window.api.jtcatSetTxFreq(hz);
     window.api.jtcatSetRxFreq(hz);
-    updateTxMarker();
   });
 
   // --- Zoom (Ctrl+/Ctrl-) ---

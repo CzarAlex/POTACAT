@@ -2442,6 +2442,12 @@ function updateRemoteSettings() {
     maxAgeMin: settings.maxAgeMin != null ? settings.maxAgeMin : 5,
     distUnit: settings.distUnit || 'mi',
     cwXit: settings.cwXit || 0,
+    cwFilterWidth: settings.cwFilterWidth || 0,
+    ssbFilterWidth: settings.ssbFilterWidth || 0,
+    digitalFilterWidth: settings.digitalFilterWidth || 0,
+    enableSplit: !!settings.enableSplit,
+    enableAtu: !!settings.enableAtu,
+    tuneClick: !!settings.tuneClick,
     enableRotor: !!settings.enableRotor,
     rotorActive: settings.rotorActive !== false,
     remoteCwEnabled: !!settings.remoteCwEnabled,
@@ -3041,6 +3047,7 @@ function connectRemote() {
     const val = Math.max(1, parseInt(value, 10) || 7);
     settings.scanDwell = val;
     saveSettings(settings);
+    updateRemoteSettings();
     console.log('[Echo CAT] Scan dwell →', val, 's');
   });
 
@@ -3048,6 +3055,7 @@ function connectRemote() {
     const val = Math.max(1, parseInt(value, 10) || 5);
     settings.maxAgeMin = val;
     saveSettings(settings);
+    updateRemoteSettings();
     console.log('[Echo CAT] Max spot age →', val, 'm');
   });
 
@@ -3055,6 +3063,7 @@ function connectRemote() {
     if (value === 'mi' || value === 'km') {
       settings.distUnit = value;
       saveSettings(settings);
+      updateRemoteSettings();
       console.log('[Echo CAT] Distance unit →', value);
     }
   });
@@ -3063,7 +3072,53 @@ function connectRemote() {
     const val = Math.max(-999, Math.min(999, parseInt(value, 10) || 0));
     settings.cwXit = val;
     saveSettings(settings);
+    updateRemoteSettings();
     console.log('[Echo CAT] CW XIT →', val, 'Hz');
+  });
+
+  remoteServer.on('set-cw-filter', ({ value }) => {
+    const val = Math.max(0, Math.min(3000, parseInt(value, 10) || 0));
+    settings.cwFilterWidth = val;
+    saveSettings(settings);
+    updateRemoteSettings();
+    console.log('[Echo CAT] CW Filter →', val, 'Hz');
+  });
+
+  remoteServer.on('set-ssb-filter', ({ value }) => {
+    const val = Math.max(0, Math.min(4000, parseInt(value, 10) || 0));
+    settings.ssbFilterWidth = val;
+    saveSettings(settings);
+    updateRemoteSettings();
+    console.log('[Echo CAT] SSB Filter →', val, 'Hz');
+  });
+
+  remoteServer.on('set-digital-filter', ({ value }) => {
+    const val = Math.max(0, Math.min(5000, parseInt(value, 10) || 0));
+    settings.digitalFilterWidth = val;
+    saveSettings(settings);
+    updateRemoteSettings();
+    console.log('[Echo CAT] Digital Filter →', val, 'Hz');
+  });
+
+  remoteServer.on('set-enable-split', ({ value }) => {
+    settings.enableSplit = !!value;
+    saveSettings(settings);
+    updateRemoteSettings();
+    console.log('[Echo CAT] Split →', value ? 'ON' : 'OFF');
+  });
+
+  remoteServer.on('set-enable-atu', ({ value }) => {
+    settings.enableAtu = !!value;
+    saveSettings(settings);
+    updateRemoteSettings();
+    console.log('[Echo CAT] ATU Auto →', value ? 'ON' : 'OFF');
+  });
+
+  remoteServer.on('set-tune-click', ({ value }) => {
+    settings.tuneClick = !!value;
+    saveSettings(settings);
+    updateRemoteSettings();
+    console.log('[Echo CAT] Tune Click →', value ? 'ON' : 'OFF');
   });
 
   remoteServer.on('lookup-call', async ({ callsign }) => {
@@ -7853,7 +7908,14 @@ app.whenReady().then(() => {
   });
   ipcMain.on('jtcat-tx-complete', () => { if (ft8Engine) ft8Engine.txComplete(); });
   ipcMain.on('jtcat-log', (_e, msg) => console.log(msg));
+  let _jtcatAudioDiag = 0;
   ipcMain.on('jtcat-audio', (_e, buf) => {
+    _jtcatAudioDiag++;
+    if (_jtcatAudioDiag <= 3 || _jtcatAudioDiag % 200 === 0) {
+      const arr = buf ? new Float32Array(buf) : null;
+      const max = arr ? Math.max(...arr.slice(0, 100).map(Math.abs)) : 0;
+      console.log(`[JTCAT] audio IPC #${_jtcatAudioDiag} len=${buf ? buf.length : 0} max=${max.toFixed(4)} engine=${!!ft8Engine}`);
+    }
     if (ft8Engine) ft8Engine.feedAudio(new Float32Array(buf));
   });
   ipcMain.on('jtcat-quiet-freq', (_e, hz) => {

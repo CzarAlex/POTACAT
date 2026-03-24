@@ -185,6 +185,9 @@ contextBridge.exposeInMainWorld('api', {
   previewClubCsv: (csvPath) => ipcRenderer.invoke('preview-club-csv', csvPath),
   hashClubPasswords: (csvPath) => ipcRenderer.invoke('hash-club-passwords', csvPath),
   createClubCsv: (rigNames) => ipcRenderer.invoke('create-club-csv', rigNames),
+  // Remote Launcher
+  installLauncher: () => ipcRenderer.invoke('install-launcher'),
+  uninstallLauncher: () => ipcRenderer.invoke('uninstall-launcher'),
   // Rig Control Panel
   rigControl: (data) => ipcRenderer.invoke('rig-control', data),
   onRigState: (cb) => ipcRenderer.on('rig-state', (_e, state) => cb(state)),

@@ -12999,6 +12999,7 @@ var jtcatAudioCtx = null;
 var jtcatAudioStream = null;
 var jtcatAudioProcessor = null;
 var jtcatAnalyser = null;
+var jtcatAudioSource = null; // strong ref to prevent GC in Chromium 134+
 var jtcatRemoteActive = false; // true when phone is driving JTCAT
 var jtcatQuietFreq = 1500;     // auto-detected quiet TX frequency (Hz)
 var jtcatQuietFreqFrame = 0;   // frame counter for throttling quiet freq updates
@@ -13026,13 +13027,13 @@ async function startJtcatAudio() {
       jtcatAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     }
 
-    // Use native sample rate — Chromium 142 doesn't properly handle cross-rate
-    // MediaStreamSource inputs. We downsample to 12kHz in the processor callback.
+    // Use native sample rate and downsample properly to 12kHz for FT8 decoder.
     jtcatAudioCtx = new AudioContext();
     if (jtcatAudioCtx.state === 'suspended') {
       await jtcatAudioCtx.resume();
     }
     var source = jtcatAudioCtx.createMediaStreamSource(jtcatAudioStream);
+    jtcatAudioSource = source; // prevent GC — Chromium 134+ may collect unrooted audio nodes
 
     // AnalyserNode for waterfall FFT
     jtcatAnalyser = jtcatAudioCtx.createAnalyser();
@@ -13040,36 +13041,78 @@ async function startJtcatAudio() {
     jtcatAnalyser.smoothingTimeConstant = 0.3;
     source.connect(jtcatAnalyser);
 
-    // Audio capture: prefer AudioWorkletNode (Chromium 134+ throttles ScriptProcessorNode)
-    // Falls back to ScriptProcessorNode if AudioWorklet is unavailable
     var nativeRate = jtcatAudioCtx.sampleRate;
     var dsRatio = nativeRate / 12000;
+    console.log('[JTCAT] AudioContext sample rate:', nativeRate, 'dsRatio:', dsRatio.toFixed(2));
 
-    // ScriptProcessorNode: captures audio at native rate, downsamples to 12kHz for FT8 decoder
-    var bufSize = dsRatio > 1 ? 4096 * Math.ceil(dsRatio) : 4096;
-    bufSize = Math.pow(2, Math.ceil(Math.log2(bufSize)));
-    if (bufSize > 16384) bufSize = 16384;
-    jtcatAudioProcessor = jtcatAudioCtx.createScriptProcessor(bufSize, 1, 1);
-    jtcatAudioProcessor.onaudioprocess = function(e) {
-      try {
-        var rawSamples = e.inputBuffer.getChannelData(0);
-        var samples;
-        if (dsRatio > 1.01) {
-          var outLen = Math.floor(rawSamples.length / dsRatio);
-          samples = new Float32Array(outLen);
-          for (var i = 0; i < outLen; i++) {
-            samples[i] = rawSamples[Math.round(i * dsRatio)];
-          }
-        } else {
-          samples = rawSamples;
+    // Try AudioWorklet first (reliable on Chromium 134+), fall back to ScriptProcessorNode
+    try {
+      await jtcatAudioCtx.audioWorklet.addModule('jtcat-audio-worklet.js');
+      var workletNode = new AudioWorkletNode(jtcatAudioCtx, 'jtcat-processor', {
+        processorOptions: { dsRatio: dsRatio },
+      });
+      workletNode.port.onmessage = function(e) {
+        window.api.jtcatAudio(e.data);
+      };
+      source.connect(workletNode);
+      workletNode.connect(jtcatAudioCtx.destination);
+      jtcatAudioProcessor = workletNode;
+      console.log('[JTCAT] Using AudioWorkletNode for audio capture');
+    } catch (workletErr) {
+      console.warn('[JTCAT] AudioWorklet failed:', workletErr.message, '— falling back to ScriptProcessorNode');
+      var bufSize = dsRatio > 1 ? 4096 * Math.ceil(dsRatio) : 4096;
+      bufSize = Math.pow(2, Math.ceil(Math.log2(bufSize)));
+      if (bufSize > 16384) bufSize = 16384;
+      jtcatAudioProcessor = jtcatAudioCtx.createScriptProcessor(bufSize, 1, 1);
+      // Build anti-alias FIR filter for proper downsampling
+      var firCoeffs = null, firHistory = null, firIdx = 0, decCounter = 0;
+      if (dsRatio > 1.01) {
+        var cutoff = 0.45 / dsRatio;
+        var taps = Math.max(31, Math.round(dsRatio * 16) | 1);
+        firCoeffs = new Float32Array(taps);
+        firHistory = new Float32Array(taps);
+        var mid = (taps - 1) / 2, fsum = 0;
+        for (var t = 0; t < taps; t++) {
+          var n = t - mid;
+          var h = Math.abs(n) < 1e-6 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * n) / (Math.PI * n);
+          var w = 0.42 - 0.5 * Math.cos(2 * Math.PI * t / (taps - 1)) + 0.08 * Math.cos(4 * Math.PI * t / (taps - 1));
+          firCoeffs[t] = h * w; fsum += firCoeffs[t];
         }
-        window.api.jtcatAudio(Array.from(samples));
-      } catch (err) {
-        console.error('[JTCAT] Audio processor error:', err.message || err);
+        for (var t = 0; t < taps; t++) firCoeffs[t] /= fsum;
       }
-    };
-    source.connect(jtcatAudioProcessor);
-    jtcatAudioProcessor.connect(jtcatAudioCtx.destination);
+      jtcatAudioProcessor.onaudioprocess = function(e) {
+        try {
+          var rawSamples = e.inputBuffer.getChannelData(0);
+          var samples;
+          if (dsRatio > 1.01) {
+            var out = [];
+            var ratio = Math.round(dsRatio);
+            for (var i = 0; i < rawSamples.length; i++) {
+              firHistory[firIdx] = rawSamples[i];
+              firIdx = (firIdx + 1) % firCoeffs.length;
+              decCounter++;
+              if (decCounter >= ratio) {
+                decCounter = 0;
+                var sum = 0, idx = firIdx;
+                for (var t = 0; t < firCoeffs.length; t++) {
+                  sum += firHistory[idx] * firCoeffs[t];
+                  idx = (idx + 1) % firCoeffs.length;
+                }
+                out.push(sum);
+              }
+            }
+            samples = out;
+          } else {
+            samples = Array.from(rawSamples);
+          }
+          window.api.jtcatAudio(samples);
+        } catch (err) {
+          console.error('[JTCAT] Audio processor error:', err.message || err);
+        }
+      };
+      source.connect(jtcatAudioProcessor);
+      jtcatAudioProcessor.connect(jtcatAudioCtx.destination);
+    }
 
     // Monitor audio stream — some rigs (e.g. Yaesu FT-710) disconnect USB audio during TX
     var audioTrack = jtcatAudioStream.getAudioTracks()[0];
@@ -13100,6 +13143,7 @@ function stopJtcatAudio() {
     waterfallAnimFrame = null;
   }
   jtcatAnalyser = null;
+  jtcatAudioSource = null;
   if (jtcatAudioProcessor) {
     jtcatAudioProcessor.disconnect();
     jtcatAudioProcessor = null;
@@ -13121,7 +13165,8 @@ function startJtcatView() {
   jtcatDecodeLog = [];
   jtcatMapClear();
   // If remote is already driving the engine, just start the UI — don't restart engine/audio
-  if (!jtcatRemoteActive) {
+  // If popout is open, it handles its own engine start + audio capture
+  if (!jtcatRemoteActive && !jtcatPopoutOpen) {
     window.api.jtcatStart(jtcatModeSelect.value);
     startJtcatAudio();
   }

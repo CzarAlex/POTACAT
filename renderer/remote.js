@@ -377,9 +377,32 @@
   const soDistKm = document.getElementById('so-dist-km');
   const soThemeDark = document.getElementById('so-theme-dark');
   const soThemeLight = document.getElementById('so-theme-light');
+  // Tuning settings overlay elements
+  const soXitDn = document.getElementById('so-xit-dn');
+  const soXitUp = document.getElementById('so-xit-up');
+  const soXitVal = document.getElementById('so-xit-val');
+  const soCwFiltDn = document.getElementById('so-cwfilt-dn');
+  const soCwFiltUp = document.getElementById('so-cwfilt-up');
+  const soCwFiltVal = document.getElementById('so-cwfilt-val');
+  const soSsbFiltDn = document.getElementById('so-ssbfilt-dn');
+  const soSsbFiltUp = document.getElementById('so-ssbfilt-up');
+  const soSsbFiltVal = document.getElementById('so-ssbfilt-val');
+  const soDigFiltDn = document.getElementById('so-digfilt-dn');
+  const soDigFiltUp = document.getElementById('so-digfilt-up');
+  const soDigFiltVal = document.getElementById('so-digfilt-val');
+  const soSplitBtn = document.getElementById('so-split-btn');
+  const soAtuAutoBtn = document.getElementById('so-atu-auto-btn');
+  const soTuneClickBtn = document.getElementById('so-tune-click-btn');
   // Settings state from desktop
   let maxAgeMin = 5;
   let distUnit = 'mi';
+  let cwXit = 0;
+  let cwFilterWidth = 0;
+  let ssbFilterWidth = 0;
+  let digitalFilterWidth = 0;
+  let enableSplit = false;
+  let enableAtu = false;
+  let tuneClick = false;
 
   // --- Theme ---
   function applyTheme(light) {
@@ -538,12 +561,21 @@
           refreshRateBtn.textContent = refreshInterval + 's';
           maxAgeMin = msg.settings.maxAgeMin != null ? msg.settings.maxAgeMin : 5;
           distUnit = msg.settings.distUnit || 'mi';
+          // Tuning settings from desktop
+          cwXit = msg.settings.cwXit || 0;
+          cwFilterWidth = msg.settings.cwFilterWidth || 0;
+          ssbFilterWidth = msg.settings.ssbFilterWidth || 0;
+          digitalFilterWidth = msg.settings.digitalFilterWidth || 0;
+          enableSplit = !!msg.settings.enableSplit;
+          enableAtu = !!msg.settings.enableAtu;
+          tuneClick = !!msg.settings.tuneClick;
           // Sync overlay values
           soDwellVal.textContent = scanDwell + 's';
           soRefreshVal.textContent = refreshInterval + 's';
           soMaxageVal.textContent = maxAgeMin + 'm';
           soDistMi.classList.toggle('active', distUnit === 'mi');
           soDistKm.classList.toggle('active', distUnit === 'km');
+          syncTuningUI();
           if (msg.settings.remoteCwMacros) syncMacrosFromSettings(msg.settings.remoteCwMacros);
           if (msg.settings.customCatButtons) loadCustomCatButtons(msg.settings.customCatButtons);
           // PSTRotator toggle — show when configured, reflect active state
@@ -629,6 +661,7 @@
         break;
 
       case 'cw-state':
+        stopCwTextSidetone(); // cancel text playback if paddle keying arrives
         cwIndicator.classList.toggle('active', !!msg.keying);
         handleCwSidetone(!!msg.keying);
         break;
@@ -705,6 +738,26 @@
 
       case 'cluster-state':
         clusterConnected = !!msg.connected;
+        break;
+
+      case 'settings-update':
+        if (msg.settings) {
+          if (msg.settings.scanDwell != null) { scanDwell = msg.settings.scanDwell; soDwellVal.textContent = scanDwell + 's'; }
+          if (msg.settings.refreshInterval != null) { refreshInterval = msg.settings.refreshInterval; refreshRateBtn.textContent = refreshInterval + 's'; soRefreshVal.textContent = refreshInterval + 's'; }
+          if (msg.settings.maxAgeMin != null) { maxAgeMin = msg.settings.maxAgeMin; soMaxageVal.textContent = maxAgeMin + 'm'; }
+          if (msg.settings.distUnit) { distUnit = msg.settings.distUnit; soDistMi.classList.toggle('active', distUnit === 'mi'); soDistKm.classList.toggle('active', distUnit === 'km'); }
+          if (msg.settings.cwXit != null) cwXit = msg.settings.cwXit;
+          if (msg.settings.cwFilterWidth != null) cwFilterWidth = msg.settings.cwFilterWidth;
+          if (msg.settings.ssbFilterWidth != null) ssbFilterWidth = msg.settings.ssbFilterWidth;
+          if (msg.settings.digitalFilterWidth != null) digitalFilterWidth = msg.settings.digitalFilterWidth;
+          if (msg.settings.enableSplit != null) enableSplit = !!msg.settings.enableSplit;
+          if (msg.settings.enableAtu != null) enableAtu = !!msg.settings.enableAtu;
+          if (msg.settings.tuneClick != null) tuneClick = !!msg.settings.tuneClick;
+          if (msg.settings.enableRotor != null) { rotorConfigured = !!msg.settings.enableRotor; rotorEnabled = !!msg.settings.rotorActive; updateRotorBtn(); }
+          if (msg.settings.remoteCwMacros) syncMacrosFromSettings(msg.settings.remoteCwMacros);
+          if (msg.settings.customCatButtons) loadCustomCatButtons(msg.settings.customCatButtons);
+          syncTuningUI();
+        }
         break;
 
       case 'call-lookup':
@@ -1731,6 +1784,105 @@
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'set-dist-unit', value: 'km' }));
     }
+  });
+
+  // --- Tuning Settings Steppers & Toggles ---
+  function syncTuningUI() {
+    soXitVal.textContent = cwXit;
+    soCwFiltVal.textContent = cwFilterWidth;
+    soSsbFiltVal.textContent = ssbFilterWidth;
+    soDigFiltVal.textContent = digitalFilterWidth;
+    soSplitBtn.classList.toggle('active', enableSplit);
+    soAtuAutoBtn.classList.toggle('active', enableAtu);
+    soTuneClickBtn.classList.toggle('active', tuneClick);
+  }
+
+  function sendSetting(type, value) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: type, value: value }));
+    }
+  }
+
+  const XIT_PRESETS = [-200, -100, -50, -20, -10, 0, 10, 20, 50, 100, 200];
+  soXitDn.addEventListener('click', () => {
+    const idx = XIT_PRESETS.indexOf(cwXit);
+    if (idx > 0) cwXit = XIT_PRESETS[idx - 1];
+    else if (idx === -1) { cwXit = Math.max(-999, cwXit - 10); }
+    soXitVal.textContent = cwXit;
+    sendSetting('set-cw-xit', cwXit);
+  });
+  soXitUp.addEventListener('click', () => {
+    const idx = XIT_PRESETS.indexOf(cwXit);
+    if (idx < XIT_PRESETS.length - 1) cwXit = XIT_PRESETS[idx + 1];
+    else if (idx === -1) { cwXit = Math.min(999, cwXit + 10); }
+    soXitVal.textContent = cwXit;
+    sendSetting('set-cw-xit', cwXit);
+  });
+
+  const CW_FILT_PRESETS = [0, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000, 2500, 3000];
+  soCwFiltDn.addEventListener('click', () => {
+    const idx = CW_FILT_PRESETS.indexOf(cwFilterWidth);
+    if (idx > 0) cwFilterWidth = CW_FILT_PRESETS[idx - 1];
+    else if (idx === -1) cwFilterWidth = CW_FILT_PRESETS[CW_FILT_PRESETS.length - 1];
+    soCwFiltVal.textContent = cwFilterWidth;
+    sendSetting('set-cw-filter', cwFilterWidth);
+  });
+  soCwFiltUp.addEventListener('click', () => {
+    const idx = CW_FILT_PRESETS.indexOf(cwFilterWidth);
+    if (idx < CW_FILT_PRESETS.length - 1) cwFilterWidth = CW_FILT_PRESETS[idx + 1];
+    else if (idx === -1) cwFilterWidth = CW_FILT_PRESETS[0];
+    soCwFiltVal.textContent = cwFilterWidth;
+    sendSetting('set-cw-filter', cwFilterWidth);
+  });
+
+  const SSB_FILT_PRESETS = [0, 1000, 1500, 1800, 2000, 2200, 2400, 2700, 3000, 3500, 4000];
+  soSsbFiltDn.addEventListener('click', () => {
+    const idx = SSB_FILT_PRESETS.indexOf(ssbFilterWidth);
+    if (idx > 0) ssbFilterWidth = SSB_FILT_PRESETS[idx - 1];
+    else if (idx === -1) ssbFilterWidth = SSB_FILT_PRESETS[SSB_FILT_PRESETS.length - 1];
+    soSsbFiltVal.textContent = ssbFilterWidth;
+    sendSetting('set-ssb-filter', ssbFilterWidth);
+  });
+  soSsbFiltUp.addEventListener('click', () => {
+    const idx = SSB_FILT_PRESETS.indexOf(ssbFilterWidth);
+    if (idx < SSB_FILT_PRESETS.length - 1) ssbFilterWidth = SSB_FILT_PRESETS[idx + 1];
+    else if (idx === -1) ssbFilterWidth = SSB_FILT_PRESETS[0];
+    soSsbFiltVal.textContent = ssbFilterWidth;
+    sendSetting('set-ssb-filter', ssbFilterWidth);
+  });
+
+  const DIGI_FILT_PRESETS = [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];
+  soDigFiltDn.addEventListener('click', () => {
+    const idx = DIGI_FILT_PRESETS.indexOf(digitalFilterWidth);
+    if (idx > 0) digitalFilterWidth = DIGI_FILT_PRESETS[idx - 1];
+    else if (idx === -1) digitalFilterWidth = DIGI_FILT_PRESETS[DIGI_FILT_PRESETS.length - 1];
+    soDigFiltVal.textContent = digitalFilterWidth;
+    sendSetting('set-digital-filter', digitalFilterWidth);
+  });
+  soDigFiltUp.addEventListener('click', () => {
+    const idx = DIGI_FILT_PRESETS.indexOf(digitalFilterWidth);
+    if (idx < DIGI_FILT_PRESETS.length - 1) digitalFilterWidth = DIGI_FILT_PRESETS[idx + 1];
+    else if (idx === -1) digitalFilterWidth = DIGI_FILT_PRESETS[0];
+    soDigFiltVal.textContent = digitalFilterWidth;
+    sendSetting('set-digital-filter', digitalFilterWidth);
+  });
+
+  soSplitBtn.addEventListener('click', () => {
+    enableSplit = !enableSplit;
+    soSplitBtn.classList.toggle('active', enableSplit);
+    sendSetting('set-enable-split', enableSplit);
+  });
+
+  soAtuAutoBtn.addEventListener('click', () => {
+    enableAtu = !enableAtu;
+    soAtuAutoBtn.classList.toggle('active', enableAtu);
+    sendSetting('set-enable-atu', enableAtu);
+  });
+
+  soTuneClickBtn.addEventListener('click', () => {
+    tuneClick = !tuneClick;
+    soTuneClickBtn.classList.toggle('active', tuneClick);
+    sendSetting('set-tune-click', tuneClick);
   });
 
   rcBwDn.addEventListener('click', () => {
@@ -4007,9 +4159,89 @@
     }
   }
 
+  // --- CW text-to-sidetone: synthesize local sidetone for macro/text playback ---
+  var MORSE_TABLE = {
+    'A':'.-','B':'-...','C':'-.-.','D':'-..','E':'.','F':'..-.','G':'--.','H':'....',
+    'I':'..','J':'.---','K':'-.-','L':'.-..','M':'--','N':'-.','O':'---','P':'.--.',
+    'Q':'--.-','R':'.-.','S':'...','T':'-','U':'..-','V':'...-','W':'.--','X':'-..-',
+    'Y':'-.--','Z':'--..','0':'-----','1':'.----','2':'..---','3':'...--','4':'....-',
+    '5':'.....','6':'-....','7':'--...','8':'---..','9':'----.','?':'..--..','=':'-...-',
+    '/':'-..-.','.':'.-.-.-',',':'--..--','+':'.-.-.','!':'-.-.--','(':'-.--.',')':'-.--.-',
+    '&':'.-...',':':'---...',';':'-.-.-.','\'':'.----.','"':'.-..-.','$':'...-..-','@':'.--.-.',
+    '-':'-....-','_':'..--.-'
+  };
+  var cwTextTimer = null;  // ID for cancelling in-progress playback
+
+  function playCwTextSidetone(text) {
+    // Cancel any in-progress text sidetone
+    stopCwTextSidetone();
+    if (!text) return;
+    ensureCwAudioCtx();
+
+    // Expand {MYCALL} locally for accurate sidetone
+    var expanded = text.replace(/\{MYCALL\}/gi, myCallsign || '');
+    var upper = expanded.toUpperCase().replace(/[^A-Z0-9\s\?\=\/\.\,\+\!\(\)\&\:\;\'\"\$\@\-\_]/g, '');
+
+    // Build element schedule: array of { tone: bool, durationUnits: N }
+    var elements = [];
+    for (var ci = 0; ci < upper.length; ci++) {
+      var ch = upper[ci];
+      if (ch === ' ') {
+        // Word gap = 7 units total
+        elements.push({ tone: false, units: 7 });
+        continue;
+      }
+      var morse = MORSE_TABLE[ch];
+      if (!morse) continue;
+      // Inter-character gap (before this char, skip if after word gap)
+      if (elements.length > 0 && !(elements[elements.length - 1].units >= 7)) {
+        elements.push({ tone: false, units: 3 });
+      }
+      for (var ei = 0; ei < morse.length; ei++) {
+        if (ei > 0) elements.push({ tone: false, units: 1 }); // inter-element gap
+        elements.push({ tone: true, units: morse[ei] === '.' ? 1 : 3 });
+      }
+    }
+
+    if (elements.length === 0) return;
+
+    // Schedule playback using setTimeout chain (works well on mobile)
+    var unitMs = 1200 / cwWpm;
+    var idx = 0;
+
+    function playNext() {
+      if (idx >= elements.length) {
+        handleCwSidetone(false);
+        cwIndicator.classList.remove('active');
+        cwTextTimer = null;
+        return;
+      }
+      var el = elements[idx++];
+      if (el.tone) {
+        handleCwSidetone(true);
+        cwIndicator.classList.add('active');
+      } else {
+        handleCwSidetone(false);
+        cwIndicator.classList.remove('active');
+      }
+      cwTextTimer = setTimeout(playNext, el.units * unitMs);
+    }
+    playNext();
+  }
+
+  function stopCwTextSidetone() {
+    if (cwTextTimer) {
+      clearTimeout(cwTextTimer);
+      cwTextTimer = null;
+      handleCwSidetone(false);
+      cwIndicator.classList.remove('active');
+    }
+  }
+
   function sendCwText(text) {
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: 'cw-text', text: text }));
+    playCwTextSidetone(text);
   }
 
   // --- Macro buttons ---
@@ -4179,13 +4411,45 @@
   var ditDown = false;
   var dahDown = false;
 
+  // --- Web MIDI state ---
+  var webMidiSupported = !!navigator.requestMIDIAccess;
+  var ecMidiAccess = null;
+  var ecMidiInput = null;
+  var ecMidiLearning = null; // 'dit' | 'dah' | null
+  var ecMidiDitNote = parseInt(localStorage.getItem('echocat-midi-dit-note'), 10);
+  var ecMidiDahNote = parseInt(localStorage.getItem('echocat-midi-dah-note'), 10);
+  if (isNaN(ecMidiDitNote)) ecMidiDitNote = -1;
+  if (isNaN(ecMidiDahNote)) ecMidiDahNote = -1;
+
+  // MIDI DOM refs
+  var soMidiConfig   = document.getElementById('so-midi-config');
+  var soMidiDevice   = document.getElementById('so-midi-device');
+  var midiRefreshBtn = document.getElementById('midi-refresh-btn');
+  var midiLearnDit   = document.getElementById('midi-learn-dit');
+  var midiLearnDah   = document.getElementById('midi-learn-dah');
+  var midiDitDisplay = document.getElementById('midi-dit-note-display');
+  var midiDahDisplay = document.getElementById('midi-dah-note-display');
+  var midiStatusEl   = document.getElementById('midi-status');
+
   // Init dropdown from saved value
   var soPaddleType = document.getElementById('so-paddle-type');
+
+  // Feature detection — remove MIDI option if Web MIDI unavailable
+  if (!webMidiSupported && soPaddleType) {
+    var midiOpt = soPaddleType.querySelector('option[value="midi"]');
+    if (midiOpt) midiOpt.remove();
+    if (paddleType === 'midi') {
+      paddleType = 'tinymidi';
+      localStorage.setItem('echocat-paddle-type', paddleType);
+    }
+  }
+
   if (soPaddleType) {
     soPaddleType.value = paddleType;
     soPaddleType.addEventListener('change', function() {
       paddleType = soPaddleType.value;
       localStorage.setItem('echocat-paddle-type', paddleType);
+      updateMidiConfigVisibility();
     });
   }
 
@@ -4235,6 +4499,171 @@
       sendPaddle('dah', 0);
     }
   });
+
+  // --- Web MIDI paddle input ---
+
+  function updateMidiConfigVisibility() {
+    if (soMidiConfig) {
+      soMidiConfig.classList.toggle('hidden', paddleType !== 'midi');
+    }
+    if (paddleType === 'midi' && webMidiSupported) {
+      ecPopulateMidiDevices();
+    }
+    if (paddleType !== 'midi') {
+      ecDisconnectMidi();
+    }
+  }
+
+  function ecUpdateMidiStatus(text, cssClass) {
+    if (!midiStatusEl) return;
+    midiStatusEl.textContent = text;
+    midiStatusEl.className = '';
+    if (cssClass) midiStatusEl.classList.add(cssClass);
+  }
+
+  function updateMidiNoteDisplays() {
+    if (midiDitDisplay) midiDitDisplay.textContent = ecMidiDitNote >= 0 ? ecMidiDitNote : '--';
+    if (midiDahDisplay) midiDahDisplay.textContent = ecMidiDahNote >= 0 ? ecMidiDahNote : '--';
+  }
+
+  function ecStopMidiLearn() {
+    ecMidiLearning = null;
+    if (midiLearnDit) {
+      midiLearnDit.textContent = 'Learn';
+      midiLearnDit.classList.remove('learning');
+    }
+    if (midiLearnDah) {
+      midiLearnDah.textContent = 'Learn';
+      midiLearnDah.classList.remove('learning');
+    }
+  }
+
+  function ecHandleMidiMessage(msg) {
+    var data = msg.data;
+    var status = data[0];
+    var note = data[1];
+    var velocity = data[2];
+    var cmd = status & 0xF0;
+    var isNoteOn = (cmd === 0x90 && velocity > 0);
+    var isNoteOff = (cmd === 0x80 || (cmd === 0x90 && velocity === 0));
+
+    // Learn mode — capture note number
+    if (ecMidiLearning && isNoteOn) {
+      if (ecMidiLearning === 'dit') {
+        ecMidiDitNote = note;
+        localStorage.setItem('echocat-midi-dit-note', note);
+      } else if (ecMidiLearning === 'dah') {
+        ecMidiDahNote = note;
+        localStorage.setItem('echocat-midi-dah-note', note);
+      }
+      ecStopMidiLearn();
+      updateMidiNoteDisplays();
+      return;
+    }
+
+    // Normal operation — map notes to paddle contacts
+    if (note === ecMidiDitNote) {
+      if (isNoteOn) { if (!ditDown) { ditDown = true; sendPaddle('dit', 1); } }
+      else if (isNoteOff) { ditDown = false; sendPaddle('dit', 0); }
+    } else if (note === ecMidiDahNote) {
+      if (isNoteOn) { if (!dahDown) { dahDown = true; sendPaddle('dah', 1); } }
+      else if (isNoteOff) { dahDown = false; sendPaddle('dah', 0); }
+    }
+  }
+
+  function ecConnectMidi(deviceId) {
+    ecDisconnectMidi();
+    if (!ecMidiAccess || !deviceId) return;
+    var inp = ecMidiAccess.inputs.get(deviceId);
+    if (!inp) {
+      ecUpdateMidiStatus('Device not found', 'error');
+      return;
+    }
+    ecMidiInput = inp;
+    ecMidiInput.onmidimessage = ecHandleMidiMessage;
+    localStorage.setItem('echocat-midi-device-id', deviceId);
+    ecUpdateMidiStatus('Connected: ' + (inp.name || inp.id), 'connected');
+  }
+
+  function ecDisconnectMidi() {
+    if (ecMidiInput) {
+      ecMidiInput.onmidimessage = null;
+      ecMidiInput = null;
+    }
+    ecStopMidiLearn();
+  }
+
+  async function ecPopulateMidiDevices() {
+    if (!webMidiSupported || !soMidiDevice) return;
+    soMidiDevice.innerHTML = '<option value="">— No MIDI devices —</option>';
+    try {
+      if (!ecMidiAccess) {
+        ecMidiAccess = await navigator.requestMIDIAccess();
+        ecMidiAccess.onstatechange = function() {
+          if (paddleType === 'midi') ecPopulateMidiDevices();
+        };
+      }
+      var inputs = Array.from(ecMidiAccess.inputs.values());
+      if (inputs.length > 0) {
+        soMidiDevice.innerHTML = '';
+        for (var i = 0; i < inputs.length; i++) {
+          var opt = document.createElement('option');
+          opt.value = inputs[i].id;
+          opt.textContent = inputs[i].name || inputs[i].id;
+          soMidiDevice.appendChild(opt);
+        }
+        var savedDevice = localStorage.getItem('echocat-midi-device-id');
+        if (savedDevice && ecMidiAccess.inputs.get(savedDevice)) {
+          soMidiDevice.value = savedDevice;
+        }
+        ecConnectMidi(soMidiDevice.value);
+      } else {
+        ecUpdateMidiStatus('No devices found', '');
+      }
+    } catch (err) {
+      console.warn('Web MIDI error:', err);
+      ecUpdateMidiStatus('MIDI error: ' + err.message, 'error');
+    }
+  }
+
+  // MIDI learn button listeners
+  if (midiLearnDit) {
+    midiLearnDit.addEventListener('click', function() {
+      if (ecMidiLearning === 'dit') { ecStopMidiLearn(); return; }
+      ecStopMidiLearn();
+      ecMidiLearning = 'dit';
+      midiLearnDit.textContent = 'Press...';
+      midiLearnDit.classList.add('learning');
+    });
+  }
+  if (midiLearnDah) {
+    midiLearnDah.addEventListener('click', function() {
+      if (ecMidiLearning === 'dah') { ecStopMidiLearn(); return; }
+      ecStopMidiLearn();
+      ecMidiLearning = 'dah';
+      midiLearnDah.textContent = 'Press...';
+      midiLearnDah.classList.add('learning');
+    });
+  }
+  if (midiRefreshBtn) {
+    midiRefreshBtn.addEventListener('click', function() {
+      ecPopulateMidiDevices();
+    });
+  }
+  if (soMidiDevice) {
+    soMidiDevice.addEventListener('change', function() {
+      ecConnectMidi(soMidiDevice.value);
+    });
+  }
+
+  // Init MIDI displays and visibility
+  updateMidiNoteDisplays();
+  updateMidiConfigVisibility();
+
+  // Auto-connect on page load if paddle type is midi
+  if (paddleType === 'midi' && webMidiSupported) {
+    setTimeout(function() { ecPopulateMidiDevices(); }, 500);
+  }
 
   // --- SSB Voice Macros ---
   var SSB_MACRO_COUNT = 5;
