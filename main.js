@@ -5865,7 +5865,8 @@ function tuneRadio(freqKhz, mode, brng, { clearXit } = {}) {
     tuneFreqHz = freqHz + settings.cwXit;
   }
 
-  sendCatLog(`tune: freq=${freqKhz}kHz → ${tuneFreqHz}Hz mode=${mode} split=${!!settings.enableSplit} filter=${filterWidth}${wantXit ? ` xit=${settings.cwXit}` : ''}`);
+  const resolvedMode = (mode || '').toUpperCase() === 'SSB' ? (tuneFreqHz >= 10000000 ? 'USB' : 'LSB') : mode;
+  sendCatLog(`tune: freq=${freqKhz}kHz → ${tuneFreqHz}Hz mode=${mode}${mode !== resolvedMode ? '→' + resolvedMode : ''} split=${!!settings.enableSplit} filter=${filterWidth}${wantXit ? ` xit=${settings.cwXit}` : ''}`);
   cat.tune(tuneFreqHz, mode, { split: settings.enableSplit, filterWidth });
 
   // Set or clear XIT via SmartSDR API (works even when tuning via CAT)
