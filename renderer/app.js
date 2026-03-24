@@ -11957,6 +11957,17 @@ async function activatorLogContact() {
   if (!activationActive) return; // must have an active activation
   const rawCallsign = activatorCallsignInput.value.trim().toUpperCase();
   if (!rawCallsign) return;
+
+  // If hunter park input has a value but hunterParkRefs is empty (user typed directly
+  // without selecting from dropdown), parse the input as a park reference
+  const hunterInput = document.getElementById('activator-hunter-park');
+  if (hunterInput && hunterInput.value.trim() && hunterParkRefs.length === 0) {
+    const typed = hunterInput.value.trim().toUpperCase();
+    // Accept anything that looks like a park ref (e.g. K-1234, VE-0456, US-1234)
+    if (/^[A-Z]{1,3}-\d{3,5}$/.test(typed)) {
+      hunterParkRefs = [{ ref: typed, name: '' }];
+    }
+  }
   if (!primaryParkRef()) {
     activatorParkRefInput.focus();
     return;
